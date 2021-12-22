@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 #define MAX_SOCKETS 2 // Maximum number of sockets we will allow open at once
-#define MAX_STREAMS 2 // Maximum number of streams total on the device
+#define MAX_STREAMS 5 // Maximum number of streams total on the device
 // The following must be powers of two
 #define STREAM_RX_SIZE 1024 // Length in bytes of each statically allocated RX stream buffer
 #define STREAM_TX_SIZE 512 // Length in bytes of each statically allocated TX stream buffer

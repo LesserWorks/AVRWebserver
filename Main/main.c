@@ -111,7 +111,7 @@ void main(void)
         if(streamTCP < 0) { // Only call accept if we don't already have an open stream
             streamTCP = accept(socketTCP, 0);
             if(streamTCP >= 0) 
-                puts("Client TCP connected");
+                puts("Main.c client connected");
         }
         else {
             int16_t retvalTCP = recv(streamTCP, buf, sizeof(buf), MSG_DONTWAIT); // We'll assume this will read the whole header

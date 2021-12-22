@@ -50,7 +50,7 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 				puts("Processes options");
 				stream->tx.next = 0; // This is not initialized by incomingPacket()
 				const uint8_t options[] = {2, 4, 536 >> 8, 536 & 0xFF, // MSS option
-											0, 0}; // End of options, should make size an even number
+											0, 0, 0, 0}; // End of options, must make size a multiple of 4
 				struct TCPheader resp = {.srcPort = tcp->destPort, .destPort = tcp->srcPort, // Flip ports
 											.seq = rand(), .ack = tcp->seq + 1, // add phantom received byte
 											.offset = (sizeof(struct TCPheader) + sizeof(options)) / 4, 
