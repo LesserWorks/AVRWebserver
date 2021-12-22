@@ -156,12 +156,13 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 
 // This function will not be called by the user directly
 int16_t TCPrecv(const int8_t stream, void *const dest, const int16_t buflen, const uint8_t flags) {
+	struct Stream *const s = &streams[stream];
 	while(1) {
-		if(streams[stream].rx.head != streams[stream].rx.tail) { // Is there data waiting
-			int16_t length = streams[stream].rx.head - streams[stream].rx.tail;
+		if(s->rx.head != s->rx.tail) { // Is there data waiting
+			int16_t length = s->rx.head - s->rx.tail;
 			for(int16_t i = 0; i < length; i++) {
 				if(i < buflen)
-					((uint8_t *)dest)[i] = streams[stream].rx.buf[streams[stream].rx.tail++ & RX_MASK];
+					((uint8_t *)dest)[i] = s->rx.buf[s->rx.tail++ & RX_MASK];
 				else
 					break; // From for-loop
 			}
@@ -169,7 +170,7 @@ int16_t TCPrecv(const int8_t stream, void *const dest, const int16_t buflen, con
 			return buflen > length ? length : buflen; // We wrote to user the minimum of these
 		}
 		// The following three states are the only ones in which we can still receive data
-		else if(streams[stream].state != ESTABLISHED && streams[stream].state != FIN_WAIT_1 && streams[stream].state != FIN_WAIT_2) 
+		else if(s->state != ESTABLISHED && s->state != FIN_WAIT_1 && s->state != FIN_WAIT_2) 
 			return 0; // Return 0 if other end sent FIN and there is no more data waiting
 		else if(flags == MSG_DONTWAIT)
 			return -1; // return EWOULDBLOCK
@@ -180,11 +181,12 @@ int16_t TCPrecv(const int8_t stream, void *const dest, const int16_t buflen, con
 
 // This function will not be called by the user directly
 int16_t TCPsend(const int8_t stream, const void *const src, const int16_t buflen, const uint8_t flags) {
-	if(streams[stream].state == ESTABLISHED || streams[stream].state == CLOSE_WAIT) { // These are the only states we can send data from
-		int16_t room = STREAM_TX_SIZE - (streams[stream].rx.head - streams[stream].rx.tail); // Available space in TX buffer
+	struct Stream *const s = &streams[stream];
+	if(s->state == ESTABLISHED || s->state == CLOSE_WAIT) { // These are the only states we can send data from
+		int16_t room = STREAM_TX_SIZE - (s->tx.head - s->tx.tail); // Available space in TX buffer
 		for(int16_t i = 0; i < room; i++) {
 			if(i < buflen)
-				streams[stream].tx.buf[streams[stream].tx.head++ & TX_MASK] = ((uint8_t *)src)[i];
+				s->tx.buf[s->tx.head++ & TX_MASK] = ((uint8_t *)src)[i];
 			else
 				break; // From for-loop
 		}
@@ -197,37 +199,35 @@ int16_t TCPsend(const int8_t stream, const void *const src, const int16_t buflen
 }
 
 void TCPclose(const int8_t stream) {
-	switch(streams[stream].state) {
+	struct Stream *const s = &streams[stream];
+	switch(s->state) {
 		// It only makes sense to call close in the following states
 		case ESTABLISHED:
 		case CLOSE_WAIT:
-			sendTCPpacket(&streams[stream], streams[stream].tx.next + streams[stream].tx.rawseq, 
-											streams[stream].rx.head + streams[stream].rx.rawseq, 
-											FIN | ACK, NULL, 0, NULL, 0);
+			sendTCPpacket(s, s->tx.next + s->tx.rawseq, s->rx.head + s->rx.rawseq, FIN | ACK, NULL, 0, NULL, 0);
 			// We arbitrarily decide to not increment tx.next here despite sending a phantom byte
-			if(streams[stream].state == ESTABLISHED)
-				streams[stream].state = FIN_WAIT_1; // Wait for them to ACK our FIN before they send their own FIN
+			if(s->state == ESTABLISHED)
+				s->state = FIN_WAIT_1; // Wait for them to ACK our FIN before they send their own FIN
 			else // CLOSE_WAIT
-				streams[stream].state = LAST_ACK; // Wait for them to ACK our FIN
+				s->state = LAST_ACK; // Wait for them to ACK our FIN
 			break;
 		default:
-			streams[stream].state = CLOSED; // Strictly speaking unnecessary to set this
-			streams[stream].inUse = 0; // Free this stream
+			s->state = CLOSED; // Strictly speaking unnecessary to set this
+			s->inUse = 0; // Free this stream
 			break;
 	}
 }
 
 static void sendWhatWeCan(const int8_t stream) {
-	const uint16_t ableToSend = streams[stream].tx.tail + streams[stream].tx.window < streams[stream].tx.head ? 
-						  		streams[stream].tx.tail + streams[stream].tx.window - streams[stream].tx.next :
-						  		streams[stream].tx.head - streams[stream].tx.next; // Calculate how much we can send based on send window
+	struct Stream *const s = &streams[stream];
+	const uint16_t ableToSend = s->tx.tail + s->tx.window < s->tx.head ? 
+						  		s->tx.tail + s->tx.window - s->tx.next :
+						  		s->tx.head - s->tx.next; // Calculate how much we can send based on send window
 	if(ableToSend > 0) { // This means we will even send 1-byte payloads, which is very inefficient
 		uint8_t temp[ableToSend]; // Make temp buffer to straighten out circular buffer
 		for(uint16_t i = 0; i < ableToSend; i++)
-			temp[i] = streams[stream].tx.buf[streams[stream].tx.next++ & TX_MASK]; // Copy what we'll send in this packet to temp
-		sendTCPpacket(&streams[stream], streams[stream].tx.next + streams[stream].tx.rawseq, 
-										streams[stream].rx.head + streams[stream].rx.rawseq,
-										ACK, NULL, 0, temp, ableToSend);
+			temp[i] = s->tx.buf[s->tx.next++ & TX_MASK]; // Copy what we'll send in this packet to temp
+		sendTCPpacket(s, s->tx.next + s->tx.rawseq, s->rx.head + s->rx.rawseq, ACK, NULL, 0, temp, ableToSend);
 	}
 }
 
