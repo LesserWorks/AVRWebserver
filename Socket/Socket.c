@@ -73,14 +73,17 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 			break;
 		case ESTABLISHED: // These are the three states in which we can receive data
 		case FIN_WAIT_1:
-		case FIN_WAIT_2:
+		case FIN_WAIT_2: {
 			const uint16_t payloadLen = ip->length - ip->iht * 4 - tcp->offset * 4; 
 			if(STREAM_RX_SIZE - (stream->rx.head - stream->rx.tail) >= payloadLen && payloadLen > 0) { // Do we have room for this payload?
 				if(tcp->seq - stream->rx.rawseq == stream->rx.head) { // Is this payload contiguous with any previous payloads?
 					const uint8_t *const restrict payload = (uint8_t *)tcp + tcp->offset * 4;
 					for(uint16_t i = 0; i < payloadLen; i++)
 						stream->rx.buf[stream->rx.head++ & RX_MASK] = payload[i]; // Write in this data
-					// Compose ACK packet 
+					// Send ACK packet 
+					sendTCPpacket(stream, stream->tx.next + stream->tx.rawseq, stream->rx.head + stream->rx.rawseq,
+										  ACK, NULL, 0, NULL, 0);
+					/*
 					struct TCPheader resp = {.srcPort = tcp->destPort, .destPort = tcp->srcPort, // Flip ports
 										.seq = stream->tx.next + stream->tx.rawseq, .ack = stream->rx.head + stream->rx.rawseq,  
 										.offset = (sizeof(struct TCPheader)) / 4, 
@@ -89,20 +92,24 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 										.checksum = 0, .urgent = 0};
 					resp.checksum = TCPchecksum(&stream->remoteIP, &resp, NULL, 0, NULL, 0);
 					sendIPv4packet(&ip->srcIP, &localIP, PROTO_TCP, sizeof(resp) + sizeof(options), 1, 
-						LAYERS({&resp, sizeof(resp)}));
+						LAYERS({&resp, sizeof(resp)})); */
 				} // A proper implementation would allow receiving discontiguous received payloads and selective acknowledgement
 			}
 			stream->tx.window = stream->tx.scale * tcp->window; // Update our send window
 			stream->tx.tail = tcp->ack - stream->tx.rawseq; // Move tail to after last ACKed byte
 
-			if(tcp->flags & FIN) { // We received a FIN frame 
+			// Have we received a FIN frame and we have ACKed all their data up to FIN?
+			if(tcp->flags & FIN && tcp->seq == stream->rx.head + stream->rx.rawseq) {
 				// Send ACK to their FIN here
-				switch(stream->state) { // Sorry for another switch here
+				sendTCPpacket(stream, stream->tx.next + stream->tx.rawseq, 
+									  stream->rx.head + 1 + stream->rx.rawseq, // Add 1 to ACK their FIN phantom byte
+									  ACK, NULL, 0, NULL, 0);
+				switch(stream->state) { // Sorry for a nested switch here
 					case ESTABLISHED:
 						stream->state = CLOSE_WAIT; // Now we wait for user to call closeStream()
 						break;
-					case FIN_WAIT_1: // Send ACK, if we got also our FIN acked, then go to TIME_WAIT, else CLOSING
-						if(stream->tx.tail > stream->tx.next) // If our FIN was also ACKed with this packet (also see below)
+					case FIN_WAIT_1:
+						if(stream->tx.tail > stream->tx.next) // If our FIN was also ACKed with this packet (also see if() below)
 							stream->state = TIME_WAIT; // All done, just wait for all packets to get through now
 						else
 							stream->state = CLOSING; // Wait for them to ACK our FIN
@@ -112,15 +119,27 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 						break;
 				}
 			}
-			// This if-statement assumes that when user calls closeStream() it does not increment tx.next
+			// This if-statement assumes that when user calls closeStream() it does not increment tx.next with phantom byte
 			else if(stream[state] == FIN_WAIT_1 && stream->tx.tail > stream->tx.next) // If we received an ACK for our FIN
 				stream->state = FIN_WAIT_2; // Now wait for their FIN
 			break;
-		case CLOSE_WAIT:
-		case LAST_ACK:
+		}
+		case LAST_ACK: // In these two states we are just waiting for them to ACK our FIN
 		case CLOSING:
+			stream->tx.tail = tcp->ack - stream->tx.rawseq; // Move tail to after last ACKed byte
+			if((tcp->flags & ACK) && stream->tx.tail > stream->tx.next) { // They ACKed our FIN
+				if(stream->state == LAST_ACK) {
+					stream->state = CLOSED;
+					stream->inUse = 0; // Free this stream
+				}
+				else { // CLOSING
+					stream->state = TIME_WAIT;
+				}
+			}
+			break;
 		case TIME_WAIT:
-		case SYN_SENT: // We don't expect to be in this state
+		case SYN_SENT: // TCP active open (i.e. sending SYN) not currently supported
+		case CLOSE_WAIT: // We do not expect to receive packets in this state
 		default:
 			;
 	}
@@ -171,8 +190,21 @@ int16_t TCPsend(const int8_t stream, const void *const src, const int16_t buflen
 void TCPclose(const int8_t stream) {
 	switch(streams[stream].state) {
 		// It only makes sense to call close in the following states
-		case ESTABLISHED: // Send fin, go to FIN_WAIT_1
-		case CLOSE_WAIT: // Send fin, go to LAST_ACK
+		case ESTABLISHED:
+		case CLOSE_WAIT:
+			sendTCPpacket(&streams[stream], streams[stream].tx.next + streams[stream].tx.rawseq, 
+											streams[stream].rx.head + streams[stream].rx.rawseq, 
+											FIN | ACK, NULL, 0, NULL, 0);
+			// We arbitrarily decide to not increment tx.next here despite sending a phantom byte
+			if(streams[stream].state == ESTABLISHED)
+				streams[stream].state = FIN_WAIT_1; // Wait for them to ACK our FIN before they send their own FIN
+			else // CLOSE_WAIT
+				streams[stream].state = LAST_ACK; // Wait for them to ACK our FIN
+			break;
+		default:
+			streams[stream].state = CLOSED; // Strictly speaking unnecessary to set this
+			streams[stream].inUse = 0; // Free this stream
+			break;
 	}
 }
 
@@ -181,22 +213,29 @@ static void sendWhatWeCan(const int8_t stream) {
 						  		streams[stream].tx.tail + streams[stream].tx.window - streams[stream].tx.next :
 						  		streams[stream].tx.head - streams[stream].tx.next; // Calculate how much we can send based on send window
 	if(ableToSend > 0) { // This means we will even send 1-byte payloads, which is very inefficient
-		struct TCPheader pkt = {.srcPort = sockets[streams[stream].parent].port, 
-								.destPort = streams[stream].remotePort,
-								.seq = streams[stream].tx.next + streams[stream].tx.rawseq, 
-								.ack = streams[stream].rx.head + streams[stream].rx.rawseq,  
-								.offset = (sizeof(struct TCPheader)) / 4, 
-								.zero = 0, .flags = ACK, 
-								.window = STREAM_RX_SIZE - (streams[stream].rx.head - streams[stream].rx.tail),
-								.checksum = 0, .urgent = 0};
 		uint8_t temp[ableToSend]; // Make temp buffer to straighten out circular buffer
 		for(uint16_t i = 0; i < ableToSend; i++)
 			temp[i] = streams[stream].tx.buf[streams[stream].tx.next++ & TX_MASK]; // Copy what we'll send in this packet to temp
-		ptk.checksum = TCPchecksum(&stream->remoteIP, &pkt, NULL, 0, temp, ableToSend);
-		sendIPv4packet(&stream->remoteIP, &localIP, PROTO_TCP, sizeof(pkt) + ableToSend, 2, 
-						LAYERS({&pkt, sizeof(pkt)},
-							   {temp, ableToSend}));
+		sendTCPpacket(&streams[stream], streams[stream].tx.next + streams[stream].tx.rawseq, 
+										streams[stream].rx.head + streams[stream].rx.rawseq,
+										ACK, NULL, 0, temp, ableToSend);
 	}
+}
+
+static void sendTCPpacket(const struct Stream *const restrict stream, const uint32_t seq, const uint32_t ack, 
+	const uint16_t flags, const uint8_t options[], const uint8_t optionsLen, const uint8_t data[], const uint16_t dataLen) {
+	struct TCPheader pkt = {.srcPort = sockets[stream->parent].port, 
+							.destPort = stream->remotePort,
+							.seq = seq, .ack = ack,  
+							.offset = (sizeof(struct TCPheader) + optionsLen) / 4, 
+							.zero = 0, .flags = flags, 
+							.window = STREAM_RX_SIZE - (stream->rx.head - stream->rx.tail),
+							.checksum = 0, .urgent = 0};
+	ptk.checksum = TCPchecksum(&stream->remoteIP, &pkt, options, optionsLen, data, dataLen);
+	sendIPv4packet(&stream->remoteIP, &localIP, PROTO_TCP, sizeof(pkt) + optionsLen + dataLen, 3, 
+						LAYERS({&pkt, sizeof(pkt)},
+							   {options, optionsLen},
+							   {data, dataLen}));
 }
 static const void *getTCPoption(const uint8_t *const options, const uint8_t num) { // Returns address of length byte of that option
 	for(uint16_t i = 0; options[i] != 0x00; i++)

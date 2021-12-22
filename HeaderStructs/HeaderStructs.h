@@ -111,7 +111,7 @@ struct __attribute__((packed, scalar_storage_order("big-endian"))) TCPheader
 	uint16_t checksum;
 	uint16_t urgent;
 };
-#define NS (1 << 8)
+#define NS  (1 << 8)
 #define CWR (1 << 7)
 #define ECE (1 << 6)
 #define URG (1 << 5)

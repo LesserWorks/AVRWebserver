@@ -360,7 +360,9 @@ static void checkBank(const uint8_t registerName)
 
 static void writeBuffer(const uint8_t *const data, const uint16_t len)
 {
-	if(len > 0) {
+	// This condition is critical since higher-level functions may pass zero-length data in that should not cause
+	// any activity on the SPI lines
+	if(len > 0) { 
 		SS_low();
   	SerialTX(WBM); // Begin buffer write at wherever EWRPT is
   	for (uint16_t d = 0; d < len; ++d)
