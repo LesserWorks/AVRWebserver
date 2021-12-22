@@ -17,9 +17,9 @@ all: Main.hex
 	
 Main.hex: Main.elf
 	avr-objcopy -j .text -j .data -O ihex $< $@
-	avr-size ARPtest.elf
+	avr-size $<
 
-Main.elf: Main.o ENC28J60_functions.o uart.o ARP.o WebserverDriver.o Checksum.o ChecksumC.o DHCP.o Socket.o RTC.o
+Main.elf: Main.o ENC28J60_functions.o uart.o ARP.o WebserverDriver.o Checksum.o DHCP.o Socket.o RTC.o
 	$(CC) -mmcu=$(DEVICE) -Wl,--gc-sections $^ -o $@
 	
 Main.o: main.c  Homepage.html ../uartlibrary/uart.h \
@@ -37,9 +37,6 @@ ENC28J60_functions.o: ../ENC28J60_functions/ENC28J60_functions.c ../HeaderStruct
 	$(CC) $(CFLAGS) -c $<
 
 Checksum.o: ../Checksum/Checksum.S ../Checksum/Checksum.h
-	$(CC) $(CFLAGS) -c $<
-
-ChecksumC.o: ../Checksum/ChecksumC.c ../Checksum/Checksum.h
 	$(CC) $(CFLAGS) -c $<
 
 DHCP.o: ../DHCP/DHCP.c ../DHCP/DHCP.h ../WebserverDriver/WebserverDriver.h \
@@ -66,8 +63,8 @@ clean:
 
 .PHONY: flash
 flash: all
-	avrdude -c avrisp2 -p $(DEVICE) -P /dev/tty.usbmodem001992931 -U flash:w:ARPtest.hex
+	avrdude -c avrisp2 -p $(DEVICE) -P /dev/tty.usbmodem001992931 -U flash:w:Main.hex
 
 .PHONY: asm
-asm: ARPtest.elf
-	avr-objdump ARPtest.elf -d -S
+asm: Main.elf
+	avr-objdump $< -d -S
