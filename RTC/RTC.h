@@ -50,6 +50,7 @@ struct RealTimeClock
 	void (*const setTime)(const uint8_t s, const uint8_t min, const uint8_t h, const uint8_t d, const uint8_t mon, const uint16_t y);
 	uint8_t (*const dayOfWeek)(uint16_t d, const uint8_t mon, uint16_t y);
 	int8_t (*const setTimer)(const uint32_t seconds);
+	int8_t (*const resetTimer)(const int8_t timer, const uint32_t seconds);
 	int8_t (*const timerDone)(const int8_t timer);
 };
 

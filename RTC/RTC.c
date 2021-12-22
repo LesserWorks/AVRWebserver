@@ -31,13 +31,15 @@ static uint8_t dayOfWeek(uint16_t d, const uint8_t m, uint16_t y);
 static uint8_t notLeap(uint16_t year);
 static void addTimeZoneOffset(struct Time *const dest, const struct Time *const src, const int8_t timeZone);
 static int8_t RTCsetTimer(const uint32_t seconds);
+static int8_t RTCresetTimer(const int8_t timer, const uint32_t seconds);
 static int8_t RTCtimerDone(const int8_t timer);
 
 #ifdef USE_UNIX_TIME
 static uint64_t calcUnix(const struct Time *const restrict time);
 #endif
 
-const struct RealTimeClock RTC = {&RTCinit, &RTCread, &RTCsetTimeZone, &RTCsetTime, &dayOfWeek, &RTCsetTimer, &RTCtimerDone};
+const struct RealTimeClock RTC = {&RTCinit, &RTCread, &RTCsetTimeZone, &RTCsetTime, &dayOfWeek, 
+								  &RTCsetTimer, &RTCresetTimer, &RTCtimerDone};
 #ifdef RTC_FROM_TOSC
 static volatile struct Time rtc;
 #endif
@@ -123,6 +125,7 @@ static void RTCread(struct Time *const restrict time)
 	#endif
 }
 
+// Allocates a new timer and starts in counting down with the specified amount of seconds
 static int8_t RTCsetTimer(const uint32_t seconds)
 {
 	disableRTCint();
@@ -140,6 +143,7 @@ static int8_t RTCsetTimer(const uint32_t seconds)
 	return -1;
 }
 
+// Returns 1 if the given timer has finished, and deallocates it if so
 static int8_t RTCtimerDone(const int8_t timer)
 {
 	disableRTCint();
@@ -155,6 +159,19 @@ static int8_t RTCtimerDone(const int8_t timer)
 			enableRTCint();
 			return 0; // timer did not finish
 		}
+	}
+	enableRTCint();
+	return -1;
+}
+
+// Replaces the given counter's current value with the given number of seconds
+static int8_t RTCresetTimer(const int8_t timer, const uint32_t seconds)
+{
+	disableRTCint();
+	if(timer < MAX_TIMERS && timer >= 0 && timers[timer].inUse) {
+		timers[timer].seconds = seconds;
+		enableRTCint();
+		return 0;
 	}
 	enableRTCint();
 	return -1;

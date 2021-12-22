@@ -8,6 +8,7 @@
 #include "WebserverDriver/WebserverDriver.h"
 #include "Socket.h"
 
+#define RETRANSMIT_PERIOD 5
 
 struct Socket sockets[MAX_SOCKETS] = {0}; // Where we store our socket descriptors
 struct Stream streams[MAX_STREAMS] = {0}; // Our pool of streams that sockets can acquire
@@ -228,6 +229,7 @@ static void sendWhatWeCan(const int8_t stream) {
 		for(uint16_t i = 0; i < ableToSend; i++)
 			temp[i] = s->tx.buf[s->tx.next++ & TX_MASK]; // Copy what we'll send in this packet to temp
 		sendTCPpacket(s, s->tx.next + s->tx.rawseq, s->rx.head + s->rx.rawseq, ACK, NULL, 0, temp, ableToSend);
+		RTC.resetTimer(s->timer, RETRANSMIT_PERIOD); // After every sent data frame, reset retransmission timer
 	}
 }
 
@@ -254,6 +256,12 @@ void handleTCPtimers(void) {
 			if(streams[i].state == TIME_WAIT && RTC.timerDone(streams[i].timer) == 1) { // If TIME_WAIT timer finished
 				streams[i].state = CLOSED;
 				streams[i].inUse = 0;
+			}
+			// If retransmit timer expired while in a state where they haven't ACKed our FIN
+			else if((streams[i].state == ESTABLISHED || streams[i].state == FIN_WAIT_1 || streams[i].state == CLOSING 
+				   || streams[i].state == CLOSE_WAIT || streams[i].state == LAST_ACK)  && RTC.timerDone(streams[i].timer) == 1) { 
+				streams[i].timer = RTC.setTimer(RETRANSMIT_PERIOD);
+				sendWhatWeCan(i);
 			}
 		}
 	}
