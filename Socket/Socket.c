@@ -47,6 +47,7 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 					stream->tx.scale = 1;
 				else
 					stream->tx.scale = 1 << scale[1];
+				puts("Processes options");
 				stream->tx.next = 0; // This is not initialized by incomingPacket()
 				const uint8_t options[] = {2, 4, 536 >> 8, 536 & 0xFF, // MSS option
 											0, 0}; // End of options, should make size an even number
@@ -74,10 +75,14 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 				stream->state = ESTABLISHED;
 				puts("Stream established");
 			}
+			else if(tcp->flags & RST)
+				stream->state = LISTEN;
 			break;
 		case ESTABLISHED: // These are the three states in which we can receive data
 		case FIN_WAIT_1:
 		case FIN_WAIT_2: {
+			if(tcp->flags & RST)
+				stream->state = CLOSED;
 			const uint16_t payloadLen = ip->length - ip->iht * 4 - tcp->offset * 4; 
 			if(STREAM_RX_SIZE - (stream->rx.head - stream->rx.tail) >= payloadLen && payloadLen > 0) { // Do we have room for this payload?
 				if(tcp->seq - stream->rx.rawseq == stream->rx.head) { // Is this payload contiguous with any previous payloads?
@@ -135,6 +140,8 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 		}
 		case LAST_ACK: // In these two states we are just waiting for them to ACK our FIN
 		case CLOSING:
+			if(tcp->flags & RST)
+				stream->state = CLOSED;
 			stream->tx.tail = tcp->ack - stream->tx.rawseq; // Move tail to after last ACKed byte
 			if((tcp->flags & ACK) && stream->tx.tail > stream->tx.next) { // They ACKed our FIN
 				if(stream->state == LAST_ACK) {
@@ -151,7 +158,8 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 		case CLOSE_WAIT: // We do not expect to receive packets in these states
 		case TIME_WAIT:
 		default:
-			;
+			if(tcp->flags & RST)
+				stream->state = CLOSED;
 	}
 }
 
