@@ -11,6 +11,8 @@ extern "C" {
 #define STREAM_RX_SIZE 1024 // Length in bytes of each statically allocated RX stream buffer
 #define STREAM_TX_SIZE 512 // Length in bytes of each statically allocated TX stream buffer
 
+#define TIME_WAIT_SECONDS 10 // How many seconds TCP streams remain in TIME_WAIT before closing
+
 #define RX_MASK (STREAM_RX_SIZE - 1)
 #define TX_MASK (STREAM_TX_SIZE - 1)
 
@@ -44,6 +46,7 @@ struct Stream
 			accepted : 1;
 	enum TCPstate state; // Holds TCP state or UDP
 	int8_t parent; // Index of the socket using this stream
+	int8_t timer; // Used for TIME_WAIT timer
 	uint16_t remotePort;
 	struct IPv4 remoteIP; // Address and port of who this stream is communicating with
 	struct RX rx;
@@ -65,6 +68,7 @@ extern void TCPprocessor(struct Stream *const restrict stream, const struct IPv4
 extern int16_t TCPrecv(const int8_t stream, void *const dest, const int16_t buflen, const uint8_t flags);
 extern int16_t TCPsend(const int8_t stream, const void *const src, const int16_t buflen, const uint8_t flags);
 extern void TCPclose(const int8_t stream);
+extern void handleTCPtimers(void);
 
 #ifdef __cplusplus
 }

@@ -5,10 +5,15 @@
 #include <string.h>
 #include <avr/io.h>
 #include <stdio.h>
-#include <avr/pgmspace.h>
-#include <avr/interrupt.h>
+#//include <avr/pgmspace.h>
+//#include <avr/interrupt.h>
 #include <avr/wdt.h>
+#include <util/delay.h>
+#include "uartlibrary/uart.h"
+#include "HeaderStructs/HeaderStructs.h"
+#include "RTC/RTC.h"
 #include "WebserverDriver/WebserverDriver.h"
+#include "DHCP/DHCP.h"
 #define STR(x) PSTR(#x)
 #define UART_BAUD_RATE      9600 
 
@@ -29,10 +34,6 @@ static const char httpHeader[] = {
 };
 // Finish with Content-Length: sizeof(html)\r\n\r\n
 
-static char command[50] = {0};
-static uint8_t regName(const char *str);
-static void readBuffer(uint8_t *dest, const uint16_t len);
-static void writeBuffer(const uint8_t *data, const uint16_t len);
 static int write_char_helper(char var, FILE *stream);
 static int read_char_helper(FILE *stream);
 static FILE mystream = FDEV_SETUP_STREAM(write_char_helper, read_char_helper, _FDEV_SETUP_RW);
@@ -57,7 +58,6 @@ struct MAC zeroMAC = {{0}};
 struct IPv4 localIP = {{192, 168, 0, 0}};
 struct IPv4 routerIP = {{192, 168, 1, 1}};
 
-struct Time time;
 
 void main(void)
 {
@@ -113,19 +113,19 @@ void main(void)
         }
         else {
             int16_t retvalTCP = recv(streamTCP, buf, sizeof(buf), MSG_DONTWAIT); // We'll assume this will read the whole header
-            if(readvalTCP > 0 && memcmp(buf, "GET", 3) == 0) {
+            if(retvalTCP > 0 && memcmp(buf, "GET", 3) == 0) {
                 puts("Got GET request.");
                 char resp[sizeof(httpHeader) + 40];
                 strcpy(resp, httpHeader);
                 sprintf(resp + strlen(httpHeader), "Content-Length: %d\r\n\r\n", sizeof(html));
-                if(send(streamTCP, resp, strlen(resp) + 1, 0) < 0) // Send it right back
+                if(send(streamTCP, resp, strlen(resp) + 1, 0) < 0)
                     puts("Send header failed");
-                if(send(streamTCP, html, sizeof(html), 0) < 0) // Send it right back
-                    puts("Send TCP failed");
+                if(send(streamTCP, html, sizeof(html), 0) < 0)
+                    puts("Send html failed");
                 closeStream(streamTCP); 
                 streamTCP = -1;
             }
-            else if(readvalTCP == 0) { // Client sent TCP fin
+            else if(retvalTCP == 0) { // Client sent TCP fin
                 closeStream(streamTCP); // Close it ourselves
                 streamTCP = -1; // Allow calling accept again
             }

@@ -7,7 +7,7 @@
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include "HeaderStructs/HeaderStructs.h"
-//#include "ENC28J60_macros/ENC28J60_macros.h"
+#include "ENC28J60_macros/ENC28J60_macros.h"
 #include "ENC28J60_functions/ENC28J60_functions.h"
 #include "ARP/ARP.h"
 #include "Checksum/Checksum.h"

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include "HeaderStructs/HeaderStructs.h"
 #include "Checksum/Checksum.h"
+#include "RTC/RTC.h"
 #include "WebserverDriver/WebserverDriver.h"
 #include "Socket.h"
 
@@ -15,6 +16,8 @@ static const void *getTCPoption(const uint8_t *const options, const uint8_t num)
 static uint16_t TCPchecksum(const struct IPv4 *const restrict destIP, const struct TCPheader *const restrict tcp, 
 							const uint8_t options[], const uint8_t optionsLen, const uint8_t data[], const uint16_t dataLen);
 static void sendWhatWeCan(const int8_t stream);
+static void sendTCPpacket(const struct Stream *const restrict stream, const uint32_t seq, const uint32_t ack, 
+	const uint16_t flags, const uint8_t options[], const uint8_t optionsLen, const uint8_t data[], const uint16_t dataLen);
 
 // Main state machine: http://www.tcpipguide.com/free/t_TCPOperationalOverviewandtheTCPFiniteStateMachineF-2.htm
 // http://www.tcpipguide.com/free/t_TCPConnectionManagementandProblemHandlingtheConnec-2.htm
@@ -25,7 +28,7 @@ static void sendWhatWeCan(const int8_t stream);
 
 // Standard MSS without options is 536 bytes
 // TCP todo:
-// Closing in TCPprocessor, closeStream
+// TIME_WAIT, and retransmit timers
 
 void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header *const restrict ip, const struct TCPheader *const restrict tcp) {
 	puts("In TCPprocessor");
@@ -109,18 +112,23 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 						stream->state = CLOSE_WAIT; // Now we wait for user to call closeStream()
 						break;
 					case FIN_WAIT_1:
-						if(stream->tx.tail > stream->tx.next) // If our FIN was also ACKed with this packet (also see if() below)
+						if(stream->tx.tail > stream->tx.next) { // If our FIN was also ACKed with this packet (also see if() below)
 							stream->state = TIME_WAIT; // All done, just wait for all packets to get through now
+							stream->timer = RTC.setTimer(TIME_WAIT_SECONDS);
+						}
 						else
 							stream->state = CLOSING; // Wait for them to ACK our FIN
 						break;
 					case FIN_WAIT_2:
 						stream->state = TIME_WAIT; // All done, just wait for all packets to get through now
+						stream->timer = RTC.setTimer(TIME_WAIT_SECONDS);
+						break;
+					default: // Never reaches here
 						break;
 				}
 			}
 			// This if-statement assumes that when user calls closeStream() it does not increment tx.next with phantom byte
-			else if(stream[state] == FIN_WAIT_1 && stream->tx.tail > stream->tx.next) // If we received an ACK for our FIN
+			else if(stream->state == FIN_WAIT_1 && stream->tx.tail > stream->tx.next) // If we received an ACK for our FIN
 				stream->state = FIN_WAIT_2; // Now wait for their FIN
 			break;
 		}
@@ -134,12 +142,13 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 				}
 				else { // CLOSING
 					stream->state = TIME_WAIT;
+					stream->timer = RTC.setTimer(TIME_WAIT_SECONDS);
 				}
 			}
 			break;
-		case TIME_WAIT:
 		case SYN_SENT: // TCP active open (i.e. sending SYN) not currently supported
-		case CLOSE_WAIT: // We do not expect to receive packets in this state
+		case CLOSE_WAIT: // We do not expect to receive packets in these states
+		case TIME_WAIT:
 		default:
 			;
 	}
@@ -231,12 +240,25 @@ static void sendTCPpacket(const struct Stream *const restrict stream, const uint
 							.zero = 0, .flags = flags, 
 							.window = STREAM_RX_SIZE - (stream->rx.head - stream->rx.tail),
 							.checksum = 0, .urgent = 0};
-	ptk.checksum = TCPchecksum(&stream->remoteIP, &pkt, options, optionsLen, data, dataLen);
+	pkt.checksum = TCPchecksum(&stream->remoteIP, &pkt, options, optionsLen, data, dataLen);
 	sendIPv4packet(&stream->remoteIP, &localIP, PROTO_TCP, sizeof(pkt) + optionsLen + dataLen, 3, 
 						LAYERS({&pkt, sizeof(pkt)},
 							   {options, optionsLen},
 							   {data, dataLen}));
 }
+
+void handleTCPtimers(void) {
+	// This function handles timer-dependent TCP operations
+	for(uint16_t i = 0; i < MAX_STREAMS; i++) {
+		if(streams[i].inUse && streams[i].state != UDP_MODE) {
+			if(streams[i].state == TIME_WAIT && RTC.timerDone(streams[i].timer) == 1) { // If TIME_WAIT timer finished
+				streams[i].state = CLOSED;
+				streams[i].inUse = 0;
+			}
+		}
+	}
+}
+
 static const void *getTCPoption(const uint8_t *const options, const uint8_t num) { // Returns address of length byte of that option
 	for(uint16_t i = 0; options[i] != 0x00; i++)
 		if(options[i] != 0x01) { // if not padding
