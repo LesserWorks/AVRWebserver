@@ -77,6 +77,8 @@ void main(void)
     RTC.setTimeZone(TIMEZONE / 100);
     RTC.setTime(SECOND, MINUTE, HOUR, DAY, MONTH, YEAR); // Sets with local time of compilation
 
+    NICsetup();
+
     DHCPsetup();
     while(!DHCPready())
       packetHandler();

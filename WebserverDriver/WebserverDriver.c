@@ -221,6 +221,8 @@ void closeStream(const int8_t stream) {
 
 static void incomingMessage(const struct IPv4header *const restrict ip, const void *const restrict layer3) {
 	// First see if there is already a stream for this client. If so, add this message there.
+	printf("icnmsg: from %u.%u.%u.%u:%u to %u\n\n", ip->srcIP.addr[0], ip->srcIP.addr[1], ip->srcIP.addr[2], ip->srcIP.addr[3],
+						PORTS(layer3)->srcPort, PORTS(layer3)->destPort);
 	for(uint8_t i = 0; i < MAX_STREAMS; i++) {
 		// See if stream is in use and has matching port, address, and protocol. The layer3 trick works for both UDP and TCP packets
 		if(streams[i].inUse && sockets[streams[i].parent].protocol == ip->protocol 

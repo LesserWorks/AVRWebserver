@@ -56,9 +56,9 @@ struct Stream
 struct Socket 
 {
 	uint16_t port; // Local port of this socket
-	uint8_t protocol : 1, // TCP or UDP
-			inUse : 1,
-			listening: 1; // If this is a listening socket or not
+	uint8_t protocol; // TCP or UDP
+	uint8_t inUse : 1,
+			listening : 1; // If this is a listening socket or not
 };
 
 extern struct Socket sockets[MAX_SOCKETS]; // Where we store our socket descriptors
