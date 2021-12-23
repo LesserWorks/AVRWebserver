@@ -29,7 +29,7 @@ static const char html[] = {
 
 static const char httpHeader[] = {
 "HTTP/1.1 200 OK\r\n"
-"Content-Type: txt/html\r\n"
+"Content-Type: text/html\r\n"
 "Content-Encoding: identity\r\n"
 };
 // Finish with Content-Length: sizeof(html)\r\n\r\n

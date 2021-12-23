@@ -33,7 +33,7 @@ static void sendTCPpacket(const struct Stream *const restrict stream, const uint
 // then us receiving two RST, then a bunch of PSH|ACK|RST
 
 // Later I tried from the webbrowser on 41714 and I saw a couple ACKs from me get through
-// http://96.255.198.153:41714
+// http://96.255.198.153/home.htm
 // The relative seq number when ACKing the GET was 1, but when sending the HTTP 200 was 94, and checksum was wrong
 
 // Standard MSS without options is 536 bytes
