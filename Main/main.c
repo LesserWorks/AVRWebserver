@@ -117,13 +117,26 @@ void main(void)
             int16_t retvalTCP = recv(streamTCP, buf, sizeof(buf), MSG_DONTWAIT); // We'll assume this will read the whole header
             if(retvalTCP > 0 && memcmp(buf, "GET", 3) == 0) {
                 puts("Got GET request.");
-                char resp[sizeof(httpHeader) + 40];
+                char resp[sizeof(httpHeader) + 2] = {0};
                 strcpy(resp, httpHeader);
-                sprintf(resp + strlen(httpHeader), "Content-Length: %d\r\n\r\n", sizeof(html));
-                if(send(streamTCP, resp, strlen(resp) + 1, 0) < 0)
+                char contentLen[40];
+                sprintf(contentLen, "Content-Length: %d\r\n\r\n", sizeof(html));
+
+                uint16_t totalSize = strlen(resp) + strlen(contentLen) + sizeof(html);
+                if(totalSize % 2 != 0)
+                  totalSize += 1;
+                char sendBuf[totalSize + 2];
+                memset(sendBuf, 0, sizeof(sendBuf));
+                char *ptr = sendBuf;
+                memcpy(ptr, resp, strlen(resp));
+                ptr += strlen(resp);
+                memcpy(ptr, contentLen, strlen(contentLen));
+                ptr += strlen(contentLen);
+                memcpy(ptr, html, sizeof(html));
+
+                if(send(streamTCP, sendBuf, totalSize, 0) < 0)
                     puts("Send header failed");
-                if(send(streamTCP, html, sizeof(html), 0) < 0)
-                    puts("Send html failed");
+                puts("Just sent HTTP data");
                 closeStream(streamTCP); 
                 streamTCP = -1;
             }

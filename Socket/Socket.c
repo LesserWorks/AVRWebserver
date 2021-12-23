@@ -32,6 +32,10 @@ static void sendTCPpacket(const struct Stream *const restrict stream, const uint
 // On our end, we see us sending an ACK to the data in the PSH|ACK, then receiving FIN|ACK, us responding,
 // then us receiving two RST, then a bunch of PSH|ACK|RST
 
+// Later I tried from the webbrowser on 41714 and I saw a couple ACKs from me get through
+// http://96.255.198.153:41714
+// The relative seq number when ACKing the GET was 1, but when sending the HTTP 200 was 94, and checksum was wrong
+
 // Standard MSS without options is 536 bytes
 // TCP todo:
 // TIME_WAIT, and retransmit timers
@@ -43,7 +47,7 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 			break;
 		case LISTEN: // Expecting SYN, send SYN_ACK
 			//printf("Case LISTEN, flags = %x\n", tcp->flags);
-			if(tcp->flags == SYN) {
+			if(tcp->flags & SYN) {
 				puts("Got SYN packet");
 				stream->tx.window = tcp->window; // For now before window scaling
 				const uint8_t *const scale = getTCPoption((uint8_t *)tcp + sizeof(struct TCPheader), 3); // Process window scaling option
@@ -51,7 +55,7 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 					stream->tx.scale = 1;
 				else
 					stream->tx.scale = 1 << scale[1];
-				puts("Processes options");
+				puts("Processed options");
 				stream->tx.next = 0; // This is not initialized by incomingPacket()
 				const uint8_t options[] = {2, 4, 536 >> 8, 536 & 0xFF, // MSS option
 											1, 1, 1, 0}; // End of options, must make size a multiple of 4
@@ -79,8 +83,10 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 		case ESTABLISHED: // These are the three states in which we can receive data
 		case FIN_WAIT_1:
 		case FIN_WAIT_2: {
-			if(tcp->flags & RST)
+			if(tcp->flags & RST) {
 				stream->state = CLOSED;
+				break;
+			}
 			const uint16_t payloadLen = ip->length - ip->iht * 4 - tcp->offset * 4; 
 			printf("Est payload = %u\n", payloadLen);
 			if(STREAM_RX_SIZE - (stream->rx.head - stream->rx.tail) >= payloadLen && payloadLen > 0) { // Do we have room for this payload?
@@ -228,9 +234,10 @@ static void sendWhatWeCan(const int8_t stream) {
 						  		s->tx.head - s->tx.next; // Calculate how much we can send based on send window
 	if(ableToSend > 0) { // This means we will even send 1-byte payloads, which is very inefficient
 		uint8_t temp[ableToSend]; // Make temp buffer to straighten out circular buffer
+		const uint32_t prevNext = s->tx.next;
 		for(uint16_t i = 0; i < ableToSend; i++)
 			temp[i] = s->tx.buf[s->tx.next++ & TX_MASK]; // Copy what we'll send in this packet to temp
-		sendTCPpacket(s, s->tx.next + s->tx.rawseq, s->rx.head + s->rx.rawseq, ACK, NULL, 0, temp, ableToSend);
+		sendTCPpacket(s, prevNext + s->tx.rawseq, s->rx.head + s->rx.rawseq, ACK, NULL, 0, temp, ableToSend);
 		RTC.resetTimer(s->timer, RETRANSMIT_PERIOD); // After every sent data frame, reset retransmission timer
 	}
 }
