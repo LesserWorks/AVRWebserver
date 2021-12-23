@@ -26,23 +26,27 @@ static void sendTCPpacket(const struct Stream *const restrict stream, const uint
 // It does send RST when receives SYN for port with no listener
 // If one end sends FIN, it can still receive residual data from other end, can send data in FIN segment
 // From FIN_WAIT_1, if it receives FIN ACK it goes to TIME_WAIT
+// Currently, we are able to handshake (on Safari I type in 192.168.1.177) and it sends a GET, we receive the GET and claim
+// we send an ACK by Wireshark doesn't see the ACK
+// Wireshark shows right after handshake us being sent PSH|ACK, then FIN|ACK, then a bunch of FIN|PSH|ACK
+// On our end, we see us sending an ACK to the data in the PSH|ACK, then receiving FIN|ACK, us responding,
+// then us receiving two RST, then a bunch of PSH|ACK|RST
 
 // Standard MSS without options is 536 bytes
 // TCP todo:
 // TIME_WAIT, and retransmit timers
 
 void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header *const restrict ip, const struct TCPheader *const restrict tcp) {
-	puts("In TCPprocessor");
+	printf("TCPprocessor state = %u, flags = 0x%02X\n", stream->state, tcp->flags);
 	switch(stream->state) {
 		case CLOSED:
 			break;
 		case LISTEN: // Expecting SYN, send SYN_ACK
-			printf("Case LISTEN, flags = %x\n", tcp->flags);
+			//printf("Case LISTEN, flags = %x\n", tcp->flags);
 			if(tcp->flags == SYN) {
 				puts("Got SYN packet");
-				const uint8_t headerLen = tcp->offset * 4;
 				stream->tx.window = tcp->window; // For now before window scaling
-				const uint8_t *const scale = getTCPoption((uint8_t *)tcp + headerLen, 3); // Process window scaling option
+				const uint8_t *const scale = getTCPoption((uint8_t *)tcp + sizeof(struct TCPheader), 3); // Process window scaling option
 				if(scale == NULL)
 					stream->tx.scale = 1;
 				else
@@ -50,23 +54,17 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 				puts("Processes options");
 				stream->tx.next = 0; // This is not initialized by incomingPacket()
 				const uint8_t options[] = {2, 4, 536 >> 8, 536 & 0xFF, // MSS option
-											0, 0, 0, 0}; // End of options, must make size a multiple of 4
-				struct TCPheader resp = {.srcPort = tcp->destPort, .destPort = tcp->srcPort, // Flip ports
-											.seq = rand(), .ack = tcp->seq + 1, // add phantom received byte
-											.offset = (sizeof(struct TCPheader) + sizeof(options)) / 4, 
-											.zero = 0, .flags = SYN | ACK, 
-											.window = STREAM_RX_SIZE - (stream->rx.head - stream->rx.tail),
-											.checksum = 0, .urgent = 0};
-				resp.checksum = TCPchecksum(&stream->remoteIP, &resp, options, sizeof(options), NULL, 0);
-				stream->tx.rawseq = resp.seq + 1; // Account for phantom sent byte, our 0 point for following packets
-				
+											1, 1, 1, 0}; // End of options, must make size a multiple of 4
+				stream->tx.rawseq = rand();
+
+				sendTCPpacket(stream, 0 + stream->tx.rawseq, tcp->seq + 1,
+										  SYN | ACK, options, sizeof(options), NULL, 0);
+
+				stream->tx.rawseq += 1; // Account for phantom byte
 				stream->state = SYN_RECEIVED;
 				// We don't need to worry about the transmit window since we are only sending a phantom byte
-				printf("SYN-ACK from %u.%u.%u.%u:%u to %u.%u.%u.%u:%u\n", localIP.addr[0], localIP.addr[1], localIP.addr[2], localIP.addr[3],
-						resp.srcPort, stream->remoteIP.addr[0], stream->remoteIP.addr[1], stream->remoteIP.addr[2], stream->remoteIP.addr[3], resp.destPort);
-				sendIPv4packet(&ip->srcIP, &localIP, PROTO_TCP, sizeof(resp) + sizeof(options), 2, 
-							LAYERS({&resp, sizeof(resp)},
-								   {options, sizeof(options)}));
+				//printf("SYN-ACK from %u.%u.%u.%u:%u to %u.%u.%u.%u:%u\n", localIP.addr[0], localIP.addr[1], localIP.addr[2], localIP.addr[3],
+				//		resp.srcPort, stream->remoteIP.addr[0], stream->remoteIP.addr[1], stream->remoteIP.addr[2], stream->remoteIP.addr[3], resp.destPort);
 			}
 			break; // else drop the packet
 		case SYN_RECEIVED: // Expecting an ACK, then no further action
@@ -84,25 +82,21 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 			if(tcp->flags & RST)
 				stream->state = CLOSED;
 			const uint16_t payloadLen = ip->length - ip->iht * 4 - tcp->offset * 4; 
+			printf("Est payload = %u\n", payloadLen);
 			if(STREAM_RX_SIZE - (stream->rx.head - stream->rx.tail) >= payloadLen && payloadLen > 0) { // Do we have room for this payload?
 				if(tcp->seq - stream->rx.rawseq == stream->rx.head) { // Is this payload contiguous with any previous payloads?
 					const uint8_t *const restrict payload = (uint8_t *)tcp + tcp->offset * 4;
 					for(uint16_t i = 0; i < payloadLen; i++)
 						stream->rx.buf[stream->rx.head++ & RX_MASK] = payload[i]; // Write in this data
 					// Send ACK packet 
+					const uint8_t options[] = {1, 1, 1, 0};
 					sendTCPpacket(stream, stream->tx.next + stream->tx.rawseq, stream->rx.head + stream->rx.rawseq,
-										  ACK, NULL, 0, NULL, 0);
-					/*
-					struct TCPheader resp = {.srcPort = tcp->destPort, .destPort = tcp->srcPort, // Flip ports
-										.seq = stream->tx.next + stream->tx.rawseq, .ack = stream->rx.head + stream->rx.rawseq,  
-										.offset = (sizeof(struct TCPheader)) / 4, 
-										.zero = 0, .flags = ACK, 
-										.window = STREAM_RX_SIZE - (stream->rx.head - stream->rx.tail),
-										.checksum = 0, .urgent = 0};
-					resp.checksum = TCPchecksum(&stream->remoteIP, &resp, NULL, 0, NULL, 0);
-					sendIPv4packet(&ip->srcIP, &localIP, PROTO_TCP, sizeof(resp) + sizeof(options), 1, 
-						LAYERS({&resp, sizeof(resp)})); */
+										  ACK, options, sizeof(options), NULL, 0); 
+					puts("Est sent ACK");
 				} // A proper implementation would allow receiving discontiguous received payloads and selective acknowledgement
+				else {
+					puts("Not contiguous");
+				}
 			}
 			stream->tx.window = stream->tx.scale * tcp->window; // Update our send window
 			stream->tx.tail = tcp->ack - stream->tx.rawseq; // Move tail to after last ACKed byte
@@ -286,6 +280,18 @@ static const void *getTCPoption(const uint8_t *const options, const uint8_t num)
 	return NULL;
 }
 
+static uint16_t checksumC(const uint8_t data[], const uint16_t lenBytes) {
+	uint32_t running = 0;
+	for(uint16_t i = 0; i < lenBytes; i++) {
+		uint16_t high = data[i++];
+		uint8_t low = data[i];
+		running += (high << 8) + low;
+	}
+	while(running > 0xFFFF)
+		running = (running & 0xFFFF) + (running >> 16);
+	return ~running;
+}
+
 static uint16_t TCPchecksum(const struct IPv4 *const restrict destIP, const struct TCPheader *const restrict tcp, 
 							const uint8_t options[], const uint8_t optionsLen, const uint8_t data[], const uint16_t dataLen) {
 	//struct TCPpseudoHeader pseudo = {.srcIP = localIP, .destIP = ip->srcIP, .zero = 0, .protocol = PROTO_TCP, 
@@ -306,4 +312,5 @@ static uint16_t TCPchecksum(const struct IPv4 *const restrict destIP, const stru
 	memcpy(ptr, data, dataLen);
 	ptr += dataLen;
 	return checksumUnrolled(checksumData, ptr);
+	//return checksumC(checksumData, sizeof(struct TCPpseudoHeader) + sizeof(struct TCPheader) + optionsLen + dataLen);
 }
