@@ -15,5 +15,7 @@ sendEthernetFrame() - specific to ENC28J60
 
 NICsetup() - specific to ENC28J60
 
+packetPending() - specific to ENC28J60
+
 RTC module - uses a counter on the AVR
 
