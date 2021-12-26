@@ -34,6 +34,7 @@ static const char httpHeader[] = {
 };
 // Finish with Content-Length: sizeof(html)\r\n\r\n
 
+static void addClient(const int8_t toAdd);
 static int write_char_helper(char var, FILE *stream);
 static int read_char_helper(FILE *stream);
 static FILE mystream = FDEV_SETUP_STREAM(write_char_helper, read_char_helper, _FDEV_SETUP_RW);
@@ -52,14 +53,17 @@ void get_mcusr(void)
   MCUSR = 0;
   wdt_disable();
 }
+// these global variables should really be moved to a different file
 struct MAC unicastMAC = {{0x0, 0x1E, 0xC0, 0x8C, 0x3E, 0x00}};
 struct MAC broadcastMAC = {{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}};
 struct MAC zeroMAC = {{0}};
 struct IPv4 localIP = {{192, 168, 0, 0}};
 struct IPv4 routerIP = {{192, 168, 1, 1}};
 
+int8_t clients[10] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
 
-void main(void)
+
+int main(void)
 {
     stdout = &mystream;
   	stdin = &mystream;
@@ -100,21 +104,18 @@ void main(void)
     }
 
     packetHandler();
-    int8_t streamTCP = -1;
     
 
     uint8_t buf[1000];
   	while(1)
   	{
         packetHandler();
+        int8_t ret = accept(socketTCP, MSG_DONTWAIT);
+        if(ret >= 0)
+            addClient(ret);
 
-        if(streamTCP < 0) { // Only call accept if we don't already have an open stream
-            streamTCP = accept(socketTCP, 0);
-            if(streamTCP >= 0) 
-                puts("Main.c client connected");
-        }
-        else {
-            int16_t retvalTCP = recv(streamTCP, buf, sizeof(buf), MSG_DONTWAIT); // We'll assume this will read the whole header
+        for(uint8_t i = 0; i < sizeof(clients); i++) {
+            int16_t retvalTCP = recv(clients[i], buf, sizeof(buf), MSG_DONTWAIT); // We'll assume this will read the whole header
             if(retvalTCP > 0 && memcmp(buf, "GET", 3) == 0) {
                 puts("Got GET request.");
                 char resp[sizeof(httpHeader) + 2] = {0};
@@ -134,18 +135,28 @@ void main(void)
                 ptr += strlen(contentLen);
                 memcpy(ptr, html, sizeof(html));
 
-                if(send(streamTCP, sendBuf, totalSize, 0) < 0)
+                if(send(clients[i], sendBuf, totalSize, 0) < 0)
                     puts("Send header failed");
                 puts("Just sent HTTP data");
-                closeStream(streamTCP); 
-                streamTCP = -1;
+                closeStream(clients[i]); 
+                clients[i] = -1; // Free the spot in the array
             }
             else if(retvalTCP == 0) { // Client sent TCP fin
-                closeStream(streamTCP); // Close it ourselves
-                streamTCP = -1; // Allow calling accept again
+                closeStream(clients[i]); // Close it ourselves
+                clients[i] = -1;
             }
         }
 	  } 
+    return 0;
+}
+
+static void addClient(const int8_t toAdd) {
+  for(uint8_t i = 0; i < sizeof(clients); i++) {
+    if(clients[i] == -1) {
+      clients[i] = toAdd;
+      return;
+    }
+  }
 }
 
 // This function is called by printf as a stream handler
