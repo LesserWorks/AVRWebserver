@@ -9,7 +9,7 @@ SECOND = $(shell date +"%S" | sed 's/-0/-/;s/^0//')
 TIMEZONE = $(shell date +"%z" | sed 's/-0/-/;s/^0//')
 # date +"%S" | sed 's/-0/-/;s/^0//'
 CC = avr-gcc
-CFLAGS = -O2 -std=gnu2x -Wall -Wno-main -mmcu=$(DEVICE) -DF_CPU=$(F_CPU) -fdata-sections -ffunction-sections -I ../ \
+CFLAGS = -O2 -std=gnu2x -Wall -Wno-scalar-storage-order -mmcu=$(DEVICE) -DF_CPU=$(F_CPU) -fdata-sections -ffunction-sections -I ../ \
 -DYEAR=$(YEAR) -DMONTH=$(MONTH) -DDAY=$(DAY) -DHOUR=$(HOUR) -DMINUTE=$(MINUTE) -DSECOND=$(SECOND) -DTIMEZONE=$(TIMEZONE)
 
 .PHONY: all

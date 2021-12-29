@@ -101,9 +101,6 @@ uint8_t NICsetup(void)
 
 void packetHandler(void) {
 	while(packetPending()) {
-		cli();
-		//printf("SP: %u\n", (uint16_t)STACK_HIGH << 8 | STACK_LOW); // If I read STACK_LOW it makes it crash
-		sei();
 		const uint16_t frameSize = getFrameSize();
 		if(frameSize == 0) {
 			printf("Bad frame size\n");
@@ -126,6 +123,8 @@ void packetHandler(void) {
 				break;
 		}
 	}
+	handleTCPtimers();
+	handleDHCPtimers();
 }
 
 // For sending, it is socket, connect, send/recv

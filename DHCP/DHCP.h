@@ -7,6 +7,7 @@ extern "C" {
 extern void DHCPsetup(void);
 extern uint8_t DHCPready(void);
 extern void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const restrict dhcp);
+extern void handleDHCPtimers(void);
 
 #ifdef __cplusplus
 }

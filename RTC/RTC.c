@@ -161,7 +161,7 @@ static int8_t RTCtimerDone(const int8_t timer)
 		}
 	}
 	enableRTCint();
-	return -1;
+	return 0;
 }
 
 // Replaces the given counter's current value with the given number of seconds

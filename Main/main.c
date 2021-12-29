@@ -5,9 +5,6 @@
 #include <string.h>
 #include <avr/io.h>
 #include <stdio.h>
-#//include <avr/pgmspace.h>
-//#include <avr/interrupt.h>
-#include <avr/wdt.h>
 #include <util/delay.h>
 #include "uartlibrary/uart.h"
 #include "HeaderStructs/HeaderStructs.h"
@@ -42,17 +39,7 @@ static FILE mystream = FDEV_SETUP_STREAM(write_char_helper, read_char_helper, _F
     fgets(input, sizeof(input), stdin);
     sscanf(input, "%d", &x);
 */
-uint8_t mcusr_mirror __attribute__ ((section (".noinit")));
 
-void get_mcusr(void) \
-  __attribute__((naked)) \
-  __attribute__((section(".init3")));
-void get_mcusr(void)
-{
-  mcusr_mirror = MCUSR;
-  MCUSR = 0;
-  wdt_disable();
-}
 // these global variables should really be moved to a different file
 struct MAC unicastMAC = {{0x0, 0x1E, 0xC0, 0x8C, 0x3E, 0x00}};
 struct MAC broadcastMAC = {{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}};
@@ -75,7 +62,6 @@ int main(void)
   	PORTB = 0;
   	PORTC = 0;
   	PORTD = (1 << PORTD5) | (1 << PORTD7);
-  	wdt_reset();
   	uart_init(UART_BAUD_SELECT(UART_BAUD_RATE, F_CPU)); 
     RTC.init();
     RTC.setTimeZone(TIMEZONE / 100);

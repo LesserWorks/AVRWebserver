@@ -262,13 +262,13 @@ void handleTCPtimers(void) {
 	// This function handles timer-dependent TCP operations
 	for(uint16_t i = 0; i < MAX_STREAMS; i++) {
 		if(streams[i].inUse && streams[i].state != UDP_MODE) {
-			if(streams[i].state == TIME_WAIT && RTC.timerDone(streams[i].timer) == 1) { // If TIME_WAIT timer finished
+			if(streams[i].state == TIME_WAIT && RTC.timerDone(streams[i].timer)) { // If TIME_WAIT timer finished
 				streams[i].state = CLOSED;
 				streams[i].inUse = 0;
 			}
 			// If retransmit timer expired while in a state where they haven't ACKed our FIN
 			else if((streams[i].state == ESTABLISHED || streams[i].state == FIN_WAIT_1 || streams[i].state == CLOSING 
-				   || streams[i].state == CLOSE_WAIT || streams[i].state == LAST_ACK)  && RTC.timerDone(streams[i].timer) == 1) { 
+				   || streams[i].state == CLOSE_WAIT || streams[i].state == LAST_ACK)  && RTC.timerDone(streams[i].timer)) { 
 				streams[i].timer = RTC.setTimer(RETRANSMIT_PERIOD);
 				sendWhatWeCan(i);
 			}

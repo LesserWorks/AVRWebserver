@@ -1,13 +1,14 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
-#include <stdbool.h>
+#include <stdlib.h>
 #include <avr/io.h>
 #include <avr/eeprom.h>
 #include <util/delay.h>
 #include "HeaderStructs/HeaderStructs.h"
 #include "ENC28J60_functions/ENC28J60_functions.h"
 #include "WebserverDriver/WebserverDriver.h"
+#include "RTC/RTC.h"
 #include "ARP/ARP.h"
 #include "DHCP.h"
 
@@ -34,10 +35,16 @@ struct __attribute__((packed)) DHCPdata
 	struct IPv4 serverIP;
 };
 
+// This struct allows us to easily extract a big-endian uint32_t from a DHCP option array
+struct __attribute__((packed, scalar_storage_order("big-endian"))) TimerVal {
+	uint32_t val;
+};
+
 #define DHCP_EEPROM (struct DCHPdata *)0
 static enum DHCPstate state = INIT;
 static uint32_t expectedID;
-static uint8_t leaseValid = true;
+static int8_t T1;
+static int8_t T2; // Our DHCP lease timers
 static const void *getDHCPoption(const void *const dhcp, const uint8_t num);
 static void DHCPsendInit(void);
 
@@ -48,7 +55,7 @@ uint8_t DHCPready(void) {
 void DHCPsetup(void) { // called by user on startup
 	struct DHCPdata stored;
 	eeprom_read_block(&stored, DHCP_EEPROM, sizeof(stored));
-	if(memcmp(&stored.assignedIP, &broadcastIP, sizeof(struct IPv4)) == 0 || memcmp(&stored.serverIP, &broadcastIP, sizeof(struct IPv4)) == 0 || !leaseValid) // See if EEPROM there is uninitialized
+	if(memcmp(&stored.assignedIP, &broadcastIP, sizeof(struct IPv4)) == 0 || memcmp(&stored.serverIP, &broadcastIP, sizeof(struct IPv4)) == 0) // See if EEPROM there is uninitialized
 		state = INIT;
 	else
 		state = INIT_REBOOT;
@@ -59,7 +66,7 @@ static void DHCPsendInit(void) {
 	switch(state) {
 		case INIT: {
 			// Make DCHP Discover message
-			const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = 0x1234,
+			const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = rand(),
 										.secs = 0, .flags = 0, .clientIP = {{0}}, .yourIP = {{0}}, 
 										.serverIP = {{0}}, .gatewayIP = {{0}}, .clientHW = unicastMAC, 
 										.padding = {{0}}, .serverName = {{0}}, .bootfile = {{0}}, 
@@ -86,7 +93,7 @@ static void DHCPsendInit(void) {
 		case INIT_REBOOT: {
 			struct DHCPdata stored;
 			eeprom_read_block(&stored, DHCP_EEPROM, sizeof(stored));
-			const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = 0x4321,
+			const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = rand(),
 								.secs = 0, .flags = 0, .clientIP = {{0}}, .yourIP = {{0}}, 
 								.serverIP = {{0}}, .gatewayIP = {{0}}, .clientHW = unicastMAC, 
 								.padding = {{0}}, .serverName = {{0}}, .bootfile = {{0}}, 
@@ -117,6 +124,17 @@ static void DHCPsendInit(void) {
 	}
 }
 
+void handleDHCPtimers(void) {
+	if(state == BOUND && RTC.timerDone(T1)) { // Important that it short-circuits this condition
+		// send request to initial DHCP server
+		//state = RENEWING;
+	}
+	else if(state == RENEWING && RTC.timerDone(T2)) {
+		// send broadcast request
+		//state = REBINDING;
+	}
+}
+
 void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const restrict dhcp) {
 	if(dhcp->xid == expectedID) {
 		const uint8_t *const messageType = getDHCPoption(dhcp, 53); // Get option 53, which is message type
@@ -126,7 +144,7 @@ void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const
 				if(messageType[1] == OFFER) { // Accept the offer, send request message
 					printf("Received DHCP offer\n");
 					const uint8_t *const server = getDHCPoption(dhcp, 54); // Get server identifier
-					const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = 0x4321,
+					const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = dhcp->xid,
 								.secs = 0, .flags = 0, .clientIP = {{0}}, .yourIP = {{0}}, 
 								.serverIP = {{0}}, .gatewayIP = {{0}}, .clientHW = unicastMAC, 
 								.padding = {{0}}, .serverName = {{0}}, .bootfile = {{0}}, 
@@ -158,6 +176,14 @@ void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const
 			case REQUESTING: { // Expecting DHCP_ACK or NAK
 				if(messageType[1] == DHCP_ACK) {
 					localIP = dhcp->yourIP; // Copy over the assigned IP
+					const uint8_t *const t1val = getDHCPoption(dhcp, 58);
+					if(t1val != NULL) {
+						T1 = RTC.setTimer(((struct TimerVal *)&t1val[1])->val);
+					}
+					const uint8_t *const t2val = getDHCPoption(dhcp, 59);
+					if(t2val != NULL) {
+						T2 = RTC.setTimer(((struct TimerVal *)&t2val[1])->val); // Extract T1 and T2 timer values
+					}
 					const uint8_t *const routerList = getDHCPoption(dhcp, 3);
 					if(routerList != NULL) {
 						const struct IPv4 *const serverip = (struct IPv4 *)&routerList[1];
@@ -171,7 +197,6 @@ void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const
 					const struct DHCPdata updated = {localIP, routerIP};
 					eeprom_update_block(&updated, DHCP_EEPROM, sizeof(updated));
 					printf("Bound on address %u.%u.%u.%u\n", localIP.addr[0], localIP.addr[1], localIP.addr[2], localIP.addr[3]);
-					leaseValid = true;
 					state = BOUND;
 					arpRequest(&routerIP); // Get router MAC in the table
 				}

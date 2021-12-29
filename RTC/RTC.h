@@ -10,7 +10,7 @@ and the other is the internal Timer 2 peripheral driven by a 32kHz external crys
 This option is chosen by commenting out the undesired macro below.
 */
 
-#define MAX_TIMERS 20
+#define MAX_TIMERS 30
 
 #define RTC_FROM_TOSC
 //#define RTC_FROM_DS3231
