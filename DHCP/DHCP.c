@@ -127,15 +127,55 @@ static void DHCPsendInit(void) {
 void handleDHCPtimers(void) {
 	if(state == BOUND && RTC.timerDone(T1)) { // Important that it short-circuits this condition
 		// send request to initial DHCP server
-		//state = RENEWING;
+		const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = rand(),
+								.secs = 0, .flags = 0, .clientIP = {{0}}, .yourIP = {{0}}, 
+								.serverIP = {{0}}, .gatewayIP = {{0}}, .clientHW = unicastMAC, 
+								.padding = {{0}}, .serverName = {{0}}, .bootfile = {{0}}, 
+								.magicCookie = {{0x63, 0x82, 0x53, 0x63}}};
+		const uint8_t options[] = {53, 1, REQUEST, // message type is request
+								   12, 6, 'A', 'V', 'R', 'w', 'e', 'b', // host name (Mac sends it without null)
+								   50, 4, localIP.addr[0], localIP.addr[1], localIP.addr[2], localIP.addr[3], // requested addr
+								   61, 7, 1, unicastMAC.addr[0], unicastMAC.addr[1], unicastMAC.addr[2], unicastMAC.addr[3], unicastMAC.addr[4], unicastMAC.addr[5], // client identifier
+								   54, 4, routerIP.addr[0], routerIP.addr[1], routerIP.addr[2], routerIP.addr[3], // server identifier
+								   55, 3, 3, 58, 59, // request routers and lease times
+								   0xFF};
+		const struct UDPheader udp = {.srcPort = PORT_DHCP_CLIENT, .destPort = PORT_DHCP_SERVER, 
+									  .length = sizeof(udp) + sizeof(packet) + sizeof(options), 
+									  .checksum = 0};
+		state = RENEWING;
+		expectedID = packet.xid;
+		sendIPv4packet(&routerIP, &localIP, PROTO_UDP, udp.length, 3, 
+									LAYERS({&udp, sizeof(udp)},
+										   {&packet, sizeof(packet)},
+										   {options, sizeof(options)}));
 	}
 	else if(state == RENEWING && RTC.timerDone(T2)) {
 		// send broadcast request
-		//state = REBINDING;
+		const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = rand(),
+								.secs = 0, .flags = 0, .clientIP = {{0}}, .yourIP = {{0}}, 
+								.serverIP = {{0}}, .gatewayIP = {{0}}, .clientHW = unicastMAC, 
+								.padding = {{0}}, .serverName = {{0}}, .bootfile = {{0}}, 
+								.magicCookie = {{0x63, 0x82, 0x53, 0x63}}};
+		const uint8_t options[] = {53, 1, REQUEST, // message type is request
+								   12, 6, 'A', 'V', 'R', 'w', 'e', 'b', // host name (Mac sends it without null)
+								   50, 4, localIP.addr[0], localIP.addr[1], localIP.addr[2], localIP.addr[3], // requested addr
+								   61, 7, 1, unicastMAC.addr[0], unicastMAC.addr[1], unicastMAC.addr[2], unicastMAC.addr[3], unicastMAC.addr[4], unicastMAC.addr[5], // client identifier
+								   55, 3, 3, 58, 59, // request routers and lease times
+								   0xFF};
+		const struct UDPheader udp = {.srcPort = PORT_DHCP_CLIENT, .destPort = PORT_DHCP_SERVER, 
+									  .length = sizeof(udp) + sizeof(packet) + sizeof(options), 
+									  .checksum = 0};
+		state = RENEWING;
+		expectedID = packet.xid;
+		sendIPv4packet(&broadcastIP, &localIP, PROTO_UDP, udp.length, 3, 
+									LAYERS({&udp, sizeof(udp)},
+										   {&packet, sizeof(packet)},
+										   {options, sizeof(options)}));
+		state = REBINDING;
 	}
 }
 
-void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const restrict dhcp) {
+void DHCPprocessor(const struct DHCPheader *const restrict dhcp) {
 	if(dhcp->xid == expectedID) {
 		const uint8_t *const messageType = getDHCPoption(dhcp, 53); // Get option 53, which is message type
 		printf("Got DHCP message type %u\n", messageType[1]);
@@ -155,7 +195,7 @@ void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const
 											   50, 4, dhcp->yourIP.addr[0], dhcp->yourIP.addr[1], dhcp->yourIP.addr[2], dhcp->yourIP.addr[3], // requested addr
 											   61, 7, 1, unicastMAC.addr[0], unicastMAC.addr[1], unicastMAC.addr[2], unicastMAC.addr[3], unicastMAC.addr[4], unicastMAC.addr[5], // client identifier
 											   54, 4, server[1], server[2], server[3], server[4], // server identifier
-											   55, 1, 3, // request routers
+											   55, 3, 3, 58, 59, // request routers and lease times
 											   0xFF};
 					const struct UDPheader udp = {.srcPort = PORT_DHCP_CLIENT, .destPort = PORT_DHCP_SERVER, 
 											  .length = sizeof(udp) + sizeof(packet) + sizeof(options), 
@@ -172,6 +212,8 @@ void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const
 				}
 				break;
 			}
+			case REBINDING:
+			case RENEWING:
 			case REBOOTING:
 			case REQUESTING: { // Expecting DHCP_ACK or NAK
 				if(messageType[1] == DHCP_ACK) {
@@ -182,7 +224,10 @@ void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const
 					}
 					const uint8_t *const t2val = getDHCPoption(dhcp, 59);
 					if(t2val != NULL) {
-						T2 = RTC.setTimer(((struct TimerVal *)&t2val[1])->val); // Extract T1 and T2 timer values
+						if(state == RENEWING) // T2 timer has not expired yet
+							RTC.resetTimer(T2, ((struct TimerVal *)&t2val[1])->val);
+						else // T2 timer has not been set initially yet
+							T2 = RTC.setTimer(((struct TimerVal *)&t2val[1])->val); // Extract T2 timer values
 					}
 					const uint8_t *const routerList = getDHCPoption(dhcp, 3);
 					if(routerList != NULL) {
@@ -206,8 +251,6 @@ void DHCPprocessor(const void *const restrict ip, const struct DHCPheader *const
 				}
 				break;
 			}
-			case RENEWING: // Expecting DHCP_ACK or NAK
-			case REBINDING:
 			// We don't expect to receive DHCP packets when in the following states
 			case BOUND: 
 			case INIT:

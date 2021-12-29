@@ -44,7 +44,7 @@ const struct MAC *arp(const void *const target)
 	return NULL; // Didn't find it even after sending ARP
 }
 
-const void arpRequest(const void *const target) {
+void arpRequest(const void *const target) {
 	const struct ARP arpRequest = {1, 0x0800, 6, 4, ARP_REQUEST, unicastMAC, localIP, zeroMAC, *(const struct IPv4 *)target};
 	sendEthernetFrame(&broadcastMAC, &unicastMAC, ETHER_ARP, &arpRequest, sizeof(struct ARP), 0, NULL); // Send arp request for given IP
 }

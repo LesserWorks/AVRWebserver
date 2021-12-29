@@ -404,7 +404,7 @@ static void Layer3processor(const void *const restrict ip, const void *const res
 	{
 		case PORT_DHCP_CLIENT: // DHCP
 			if(((struct IPv4header *)ip)->protocol == PROTO_UDP) // Only support DHCP over UDP so far
-				DHCPprocessor(ip, (struct DHCPheader *)((uint8_t *)layer3 + sizeof(struct UDPheader)));
+				DHCPprocessor((struct DHCPheader *)((uint8_t *)layer3 + sizeof(struct UDPheader)));
 			break;
 		case PORT_HTTPS: // QUIC
 		default: // See if we opened a port on whatever is coming in

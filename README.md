@@ -20,3 +20,5 @@ packetPending() - specific to ENC28J60
 
 RTC module - uses a counter on the AVR
 
+DHCP module - uses non-volatile EEPROM to store an assigned DHCP address between reboots using the AVR EEPROM library
+
