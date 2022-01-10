@@ -52,11 +52,11 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 				const uint8_t options[] = {2, 4, 536 >> 8, 536 & 0xFF, // MSS option
 											1, 1, 1, 0}; // End of options, must make size a multiple of 4
 				stream->tx.rawseq = rand();
+				stream->rx.rawseq = tcp->seq; // Temporarily set our RX zero point
 
-				sendTCPpacket(stream, 0 + stream->tx.rawseq, tcp->seq + 1,
-										  SYN | ACK, options, sizeof(options), NULL, 0);
+				sendTCPpacket(stream, 0, 1, SYN | ACK, options, sizeof(options), NULL, 0);
 
-				stream->tx.rawseq += 1; // Account for phantom byte
+				stream->tx.rawseq += 1; // Account for phantom byte when setting our TX zero point
 				stream->state = SYN_RECEIVED;
 				// We don't need to worry about the transmit window since we are only sending a phantom byte
 				//printf("SYN-ACK from %u.%u.%u.%u:%u to %u.%u.%u.%u:%u\n", localIP.addr[0], localIP.addr[1], localIP.addr[2], localIP.addr[3],
@@ -65,7 +65,7 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 			break; // else drop the packet
 		case SYN_RECEIVED: // Expecting an ACK, then no further action
 			if(tcp->flags == ACK) {
-				stream->rx.rawseq = tcp->seq;
+				stream->rx.rawseq += 1; // Set RX zero point to right past phantom byte
 				stream->state = ESTABLISHED;
 				puts("Stream established");
 			}
@@ -88,8 +88,7 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 						stream->rx.buf[stream->rx.head++ & RX_MASK] = payload[i]; // Write in this data
 					// Send ACK packet 
 					const uint8_t options[] = {1, 1, 1, 0};
-					sendTCPpacket(stream, stream->tx.next + stream->tx.rawseq, stream->rx.head + stream->rx.rawseq,
-										  ACK, options, sizeof(options), NULL, 0); 
+					sendTCPpacket(stream, stream->tx.next, stream->rx.head, ACK, options, sizeof(options), NULL, 0); 
 					puts("Est sent ACK");
 				} // A proper implementation would allow receiving discontiguous received payloads and selective acknowledgement
 				else {
@@ -102,8 +101,7 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 			// Have we received a FIN frame and we have ACKed all their data up to FIN?
 			if(tcp->flags & FIN && tcp->seq == stream->rx.head + stream->rx.rawseq) {
 				// Send ACK to their FIN here
-				sendTCPpacket(stream, stream->tx.next + stream->tx.rawseq, 
-									  stream->rx.head + 1 + stream->rx.rawseq, // Add 1 to ACK their FIN phantom byte
+				sendTCPpacket(stream, stream->tx.next, stream->rx.head + 1, // Add 1 to ACK their FIN phantom byte
 									  ACK, NULL, 0, NULL, 0);
 				switch(stream->state) { // Sorry for a nested switch here
 					case ESTABLISHED:
@@ -205,7 +203,7 @@ void TCPclose(const int8_t stream) {
 		// It only makes sense to call close in the following states
 		case ESTABLISHED:
 		case CLOSE_WAIT:
-			sendTCPpacket(s, s->tx.next + s->tx.rawseq, s->rx.head + s->rx.rawseq, FIN | ACK, NULL, 0, NULL, 0);
+			sendTCPpacket(s, s->tx.next, s->rx.head, FIN | ACK, NULL, 0, NULL, 0);
 			// We arbitrarily decide to not increment tx.next here despite sending a phantom byte
 			if(s->state == ESTABLISHED)
 				s->state = FIN_WAIT_1; // Wait for them to ACK our FIN before they send their own FIN
@@ -229,7 +227,7 @@ static void sendWhatWeCan(const int8_t stream) {
 		const uint32_t prevNext = s->tx.next;
 		for(uint16_t i = 0; i < ableToSend; i++)
 			temp[i] = s->tx.buf[s->tx.next++ & TX_MASK]; // Copy what we'll send in this packet to temp
-		sendTCPpacket(s, prevNext + s->tx.rawseq, s->rx.head + s->rx.rawseq, ACK, NULL, 0, temp, ableToSend);
+		sendTCPpacket(s, prevNext, s->rx.head, ACK, NULL, 0, temp, ableToSend);
 		RTCresetTimer(s->timer, RETRANSMIT_PERIOD); // After every sent data frame, reset retransmission timer
 	}
 }
@@ -238,7 +236,7 @@ static void sendTCPpacket(const struct Stream *const restrict stream, const uint
 	const uint16_t flags, const uint8_t options[], const uint8_t optionsLen, const uint8_t data[], const uint16_t dataLen) {
 	struct TCPheader pkt = {.srcPort = sockets[stream->parent].port, 
 							.destPort = stream->remotePort,
-							.seq = seq, .ack = ack,  
+							.seq = seq + stream->tx.rawseq, .ack = ack + stream->rx.rawseq,  
 							.offset = (sizeof(struct TCPheader) + optionsLen) / 4, 
 							.zero = 0, .flags = flags, 
 							.window = STREAM_RX_SIZE - (stream->rx.head - stream->rx.tail),
