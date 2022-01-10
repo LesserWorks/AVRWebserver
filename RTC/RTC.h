@@ -36,25 +36,20 @@ struct Time
 
 /*
 Usage of the functions:
-RTC.init();
-RTC.setTimeZone(2); // UTC+2
-RTC.setTime(34, 23, 5, 23, 6, 2020);
-RTC.read(&time);
+RTCinit();
+RTCsetTimeZone(2); // UTC+2
+RTCsetTime(34, 23, 5, 23, 6, 2020);
+RTCread(&time);
 */
 
-struct RealTimeClock
-{
-	void (*const init)(void);
-	void (*const read)(struct Time *const restrict time);
-	void (*const setTimeZone)(const int8_t UTCoffset);
-	void (*const setTime)(const uint8_t s, const uint8_t min, const uint8_t h, const uint8_t d, const uint8_t mon, const uint16_t y);
-	uint8_t (*const dayOfWeek)(uint16_t d, const uint8_t mon, uint16_t y);
-	int8_t (*const setTimer)(const uint32_t seconds);
-	int8_t (*const resetTimer)(const int8_t timer, const uint32_t seconds);
-	int8_t (*const timerDone)(const int8_t timer);
-};
-
-extern const struct RealTimeClock RTC;
+extern void RTCinit(void);
+extern void RTCread(struct Time *const restrict time);
+extern void RTCsetTimeZone(const int8_t UTCoffset);
+extern void RTCsetTime(const uint8_t s, const uint8_t min, const uint8_t h, const uint8_t d, const uint8_t mon, const uint16_t y);
+extern uint8_t dayOfWeek(uint16_t d, const uint8_t m, uint16_t y);
+extern int8_t RTCsetTimer(const uint32_t seconds);
+extern int8_t RTCresetTimer(const int8_t timer, const uint32_t seconds);
+extern int8_t RTCtimerDone(const int8_t timer);
 
 	
 #ifdef __cplusplus

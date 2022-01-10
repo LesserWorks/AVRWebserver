@@ -26,19 +26,11 @@ static void sendTCPpacket(const struct Stream *const restrict stream, const uint
 // It does send RST when receives SYN for port with no listener
 // If one end sends FIN, it can still receive residual data from other end, can send data in FIN segment
 // From FIN_WAIT_1, if it receives FIN ACK it goes to TIME_WAIT
-// Currently, we are able to handshake (on Safari I type in 192.168.1.177) and it sends a GET, we receive the GET and claim
-// we send an ACK by Wireshark doesn't see the ACK
-// Wireshark shows right after handshake us being sent PSH|ACK, then FIN|ACK, then a bunch of FIN|PSH|ACK
-// On our end, we see us sending an ACK to the data in the PSH|ACK, then receiving FIN|ACK, us responding,
-// then us receiving two RST, then a bunch of PSH|ACK|RST
-
-// Later I tried from the webbrowser on 41714 and I saw a couple ACKs from me get through
-// http://96.255.198.153/home.htm
-// The relative seq number when ACKing the GET was 1, but when sending the HTTP 200 was 94, and checksum was wrong
 
 // Standard MSS without options is 536 bytes
 // TCP todo:
-// TIME_WAIT, and retransmit timers
+// Make sendTCPpacket take in relative seq numbers
+// Add separate retransmit timers for each TCP segment
 
 void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header *const restrict ip, const struct TCPheader *const restrict tcp) {
 	printf("TCPprocessor state = %u, flags = 0x%02X\n", stream->state, tcp->flags);
@@ -120,14 +112,14 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 					case FIN_WAIT_1:
 						if(stream->tx.tail > stream->tx.next) { // If our FIN was also ACKed with this packet (also see if() below)
 							stream->state = TIME_WAIT; // All done, just wait for all packets to get through now
-							stream->timer = RTC.setTimer(TIME_WAIT_SECONDS);
+							stream->timer = RTCsetTimer(TIME_WAIT_SECONDS);
 						}
 						else
 							stream->state = CLOSING; // Wait for them to ACK our FIN
 						break;
 					case FIN_WAIT_2:
 						stream->state = TIME_WAIT; // All done, just wait for all packets to get through now
-						stream->timer = RTC.setTimer(TIME_WAIT_SECONDS);
+						stream->timer = RTCsetTimer(TIME_WAIT_SECONDS);
 						break;
 					default: // Never reaches here
 						break;
@@ -150,7 +142,7 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 				}
 				else { // CLOSING
 					stream->state = TIME_WAIT;
-					stream->timer = RTC.setTimer(TIME_WAIT_SECONDS);
+					stream->timer = RTCsetTimer(TIME_WAIT_SECONDS);
 				}
 			}
 			break;
@@ -238,7 +230,7 @@ static void sendWhatWeCan(const int8_t stream) {
 		for(uint16_t i = 0; i < ableToSend; i++)
 			temp[i] = s->tx.buf[s->tx.next++ & TX_MASK]; // Copy what we'll send in this packet to temp
 		sendTCPpacket(s, prevNext + s->tx.rawseq, s->rx.head + s->rx.rawseq, ACK, NULL, 0, temp, ableToSend);
-		RTC.resetTimer(s->timer, RETRANSMIT_PERIOD); // After every sent data frame, reset retransmission timer
+		RTCresetTimer(s->timer, RETRANSMIT_PERIOD); // After every sent data frame, reset retransmission timer
 	}
 }
 
@@ -262,14 +254,14 @@ void handleTCPtimers(void) {
 	// This function handles timer-dependent TCP operations
 	for(uint16_t i = 0; i < MAX_STREAMS; i++) {
 		if(streams[i].inUse && streams[i].state != UDP_MODE) {
-			if(streams[i].state == TIME_WAIT && RTC.timerDone(streams[i].timer)) { // If TIME_WAIT timer finished
+			if(streams[i].state == TIME_WAIT && RTCtimerDone(streams[i].timer)) { // If TIME_WAIT timer finished
 				streams[i].state = CLOSED;
 				streams[i].inUse = 0;
 			}
 			// If retransmit timer expired while in a state where they haven't ACKed our FIN
 			else if((streams[i].state == ESTABLISHED || streams[i].state == FIN_WAIT_1 || streams[i].state == CLOSING 
-				   || streams[i].state == CLOSE_WAIT || streams[i].state == LAST_ACK)  && RTC.timerDone(streams[i].timer)) { 
-				streams[i].timer = RTC.setTimer(RETRANSMIT_PERIOD);
+				   || streams[i].state == CLOSE_WAIT || streams[i].state == LAST_ACK)  && RTCtimerDone(streams[i].timer)) { 
+				streams[i].timer = RTCsetTimer(RETRANSMIT_PERIOD);
 				sendWhatWeCan(i);
 			}
 		}

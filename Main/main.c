@@ -63,9 +63,9 @@ int main(void)
   	PORTC = 0;
   	PORTD = (1 << PORTD5) | (1 << PORTD7);
   	uart_init(UART_BAUD_SELECT(UART_BAUD_RATE, F_CPU)); 
-    RTC.init();
-    RTC.setTimeZone(TIMEZONE / 100);
-    RTC.setTime(SECOND, MINUTE, HOUR, DAY, MONTH, YEAR); // Sets with local time of compilation
+    RTCinit();
+    RTCsetTimeZone(TIMEZONE / 100);
+    RTCsetTime(SECOND, MINUTE, HOUR, DAY, MONTH, YEAR); // Sets with local time of compilation
 
     NICsetup();
 
@@ -81,9 +81,9 @@ int main(void)
     if(bindlisten(socketTCP, 80) < 0)
       puts("Bind TCP failed");
 
-    int8_t timer = RTC.setTimer(2);
+    int8_t timer = RTCsetTimer(2);
     while(1) {
-      if(RTC.timerDone(timer) == 1) {
+      if(RTCtimerDone(timer) == 1) {
         puts("Timer done");
         break;
       }

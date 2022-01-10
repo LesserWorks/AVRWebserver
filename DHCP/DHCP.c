@@ -125,7 +125,7 @@ static void DHCPsendInit(void) {
 }
 
 void handleDHCPtimers(void) {
-	if(state == BOUND && RTC.timerDone(T1)) { // Important that it short-circuits this condition
+	if(state == BOUND && RTCtimerDone(T1)) { // Important that it short-circuits this condition
 		// send request to initial DHCP server
 		const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = rand(),
 								.secs = 0, .flags = 0, .clientIP = {{0}}, .yourIP = {{0}}, 
@@ -149,7 +149,7 @@ void handleDHCPtimers(void) {
 										   {&packet, sizeof(packet)},
 										   {options, sizeof(options)}));
 	}
-	else if(state == RENEWING && RTC.timerDone(T2)) {
+	else if(state == RENEWING && RTCtimerDone(T2)) {
 		// send broadcast request
 		const struct DHCPheader packet = {.op = 1, .HTYPE = 1, .HLEN = 6, .hops = 0, .xid = rand(),
 								.secs = 0, .flags = 0, .clientIP = {{0}}, .yourIP = {{0}}, 
@@ -220,14 +220,14 @@ void DHCPprocessor(const struct DHCPheader *const restrict dhcp) {
 					localIP = dhcp->yourIP; // Copy over the assigned IP
 					const uint8_t *const t1val = getDHCPoption(dhcp, 58);
 					if(t1val != NULL) {
-						T1 = RTC.setTimer(((struct TimerVal *)&t1val[1])->val);
+						T1 = RTCsetTimer(((struct TimerVal *)&t1val[1])->val);
 					}
 					const uint8_t *const t2val = getDHCPoption(dhcp, 59);
 					if(t2val != NULL) {
 						if(state == RENEWING) // T2 timer has not expired yet
-							RTC.resetTimer(T2, ((struct TimerVal *)&t2val[1])->val);
+							RTCresetTimer(T2, ((struct TimerVal *)&t2val[1])->val);
 						else // T2 timer has not been set initially yet
-							T2 = RTC.setTimer(((struct TimerVal *)&t2val[1])->val); // Extract T2 timer values
+							T2 = RTCsetTimer(((struct TimerVal *)&t2val[1])->val); // Extract T2 timer values
 					}
 					const uint8_t *const routerList = getDHCPoption(dhcp, 3);
 					if(routerList != NULL) {

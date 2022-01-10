@@ -23,28 +23,18 @@ struct Timer
 static struct Timer timers[MAX_TIMERS] = {0};
 static int8_t timeZone = 0; // Start at UTC+0
 
-static void RTCinit(void);
-static void RTCread(struct Time *const restrict time);
-static void RTCsetTimeZone(const int8_t UTCoffset);
-static void RTCsetTime(const uint8_t s, const uint8_t min, const uint8_t h, const uint8_t d, const uint8_t mon, const uint16_t y);
-static uint8_t dayOfWeek(uint16_t d, const uint8_t m, uint16_t y);
 static uint8_t notLeap(uint16_t year);
 static void addTimeZoneOffset(struct Time *const dest, const struct Time *const src, const int8_t timeZone);
-static int8_t RTCsetTimer(const uint32_t seconds);
-static int8_t RTCresetTimer(const int8_t timer, const uint32_t seconds);
-static int8_t RTCtimerDone(const int8_t timer);
 
 #ifdef USE_UNIX_TIME
 static uint64_t calcUnix(const struct Time *const restrict time);
 #endif
 
-const struct RealTimeClock RTC = {&RTCinit, &RTCread, &RTCsetTimeZone, &RTCsetTime, &dayOfWeek, 
-								  &RTCsetTimer, &RTCresetTimer, &RTCtimerDone};
 #ifdef RTC_FROM_TOSC
 static volatile struct Time rtc;
 #endif
 
-static void RTCinit(void)
+void RTCinit(void)
 {
 	#ifdef RTC_FROM_TOSC
 
@@ -66,12 +56,12 @@ static void RTCinit(void)
 	#endif
 }
 
-static void RTCsetTimeZone(const int8_t UTCoffset)
+void RTCsetTimeZone(const int8_t UTCoffset)
 {
 	timeZone = UTCoffset;
 }
 
-static void RTCsetTime(const uint8_t s, const uint8_t min, const uint8_t h, const uint8_t d, const uint8_t mon, const uint16_t y)
+void RTCsetTime(const uint8_t s, const uint8_t min, const uint8_t h, const uint8_t d, const uint8_t mon, const uint16_t y)
 {
 	const uint8_t weekday = dayOfWeek(d, mon, y);
 	// 0 = Sunday, 6 = Shabbat
@@ -100,7 +90,7 @@ static void RTCsetTime(const uint8_t s, const uint8_t min, const uint8_t h, cons
 	#endif
 }
 
-static void RTCread(struct Time *const restrict time)
+void RTCread(struct Time *const restrict time)
 {
 	#ifdef RTC_FROM_TOSC
 
@@ -126,7 +116,7 @@ static void RTCread(struct Time *const restrict time)
 }
 
 // Allocates a new timer and starts in counting down with the specified amount of seconds
-static int8_t RTCsetTimer(const uint32_t seconds)
+int8_t RTCsetTimer(const uint32_t seconds)
 {
 	disableRTCint();
 	for(int8_t i = 0; i < MAX_TIMERS; i++) 
@@ -144,7 +134,7 @@ static int8_t RTCsetTimer(const uint32_t seconds)
 }
 
 // Returns 1 if the given timer has finished, and deallocates it if so
-static int8_t RTCtimerDone(const int8_t timer)
+int8_t RTCtimerDone(const int8_t timer)
 {
 	disableRTCint();
 	if(timer < MAX_TIMERS && timer >= 0 && timers[timer].inUse) {
@@ -165,7 +155,7 @@ static int8_t RTCtimerDone(const int8_t timer)
 }
 
 // Replaces the given counter's current value with the given number of seconds
-static int8_t RTCresetTimer(const int8_t timer, const uint32_t seconds)
+int8_t RTCresetTimer(const int8_t timer, const uint32_t seconds)
 {
 	disableRTCint();
 	if(timer < MAX_TIMERS && timer >= 0 && timers[timer].inUse) {
@@ -250,7 +240,7 @@ static uint8_t notLeap(uint16_t year)      //check for leap year
 	}
 }
 
-static uint8_t dayOfWeek(uint16_t d, const uint8_t m, uint16_t y)
+uint8_t dayOfWeek(uint16_t d, const uint8_t m, uint16_t y)
 {
 	// I got this formula from https://stackoverflow.com/questions/6054016/c-program-to-find-day-of-week-given-date
 	return (d += (m < 3 ? y-- : y - 2), 23*m/9 + (int)d + 4 + y/4- y/100 + y/400)%7; 
