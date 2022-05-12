@@ -4,7 +4,7 @@
 extern "C" {
 #endif
 
-extern uint16_t checksumBig(void *data, void *end);
+extern uint16_t checksumUpdate(uint16_t context, const void *data, uint16_t len);
 extern uint16_t checksumUnrolled(void *data, void *end);
 
 // This version written in C, lenBytes must be even

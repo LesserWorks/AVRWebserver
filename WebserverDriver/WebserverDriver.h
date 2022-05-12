@@ -4,8 +4,8 @@
 extern "C" {
 #endif
 
-#define MSG_DONTWAIT 1
-#define MSG_WAITALL 2
+#define MSG_DONTWAIT 0b00000001
+#define MSG_WAITALL  0b00000010
 
 extern uint8_t NICsetup(void);
 extern void packetHandler(void);

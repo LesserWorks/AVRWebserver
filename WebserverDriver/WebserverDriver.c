@@ -196,7 +196,7 @@ int8_t accept(const int8_t socket, const uint8_t flags) {
 					return i; // Return stream descriptor
 				}
 			}
-			if(flags == MSG_DONTWAIT) 
+			if(flags & MSG_DONTWAIT) 
 				break; // return EWOULDBLOCK
 			else
 				packetHandler(); // Process more packets before checking streams again
@@ -296,7 +296,7 @@ int16_t recv(const int8_t stream, void *const dest, const int16_t buflen, const 
 					}
 					return buflen > length ? length : buflen; // We wrote to user the minimum of these
 				}
-				else if(flags == MSG_DONTWAIT)
+				else if(flags & MSG_DONTWAIT)
 					break; // return EWOULDBLOCK
 				else
 					packetHandler(); // Process more packets before checking streams again
@@ -355,7 +355,8 @@ void sendIPv4packet(const struct IPv4 *const dest, const struct IPv4 *const src,
 	struct IPv4header packet = {.version = 4, .iht = 5, .dscp = 0, .ecn = 0, .length = payloadLen + sizeof(struct IPv4header), 
 								.id = rand(), .zero = 0, .df = 1, .mf = 0, .offset = 0, .ttl = 60, 
 								.protocol = protocol, .checksum = 0, .srcIP = *src, .destIP = *dest};
-	packet.checksum = checksumUnrolled(&packet, (uint8_t *)&packet + sizeof(struct IPv4header));
+	//packet.checksum = checksumUnrolled(&packet, (uint8_t *)&packet + sizeof(struct IPv4header));
+	packet.checksum = ~checksumUpdate(0, &packet, sizeof(packet));
 
 	const struct MAC *const destMAC = memcmp(dest, &broadcastIP, sizeof(struct IPv4)) == 0 ? 
 																			 &broadcastMAC : arp(&routerIP);
@@ -386,8 +387,8 @@ static void ICMPv4processor(const void *const restrict ip, const void *const res
 			memcpy((uint8_t *)icmpReply + sizeof(struct ICMPv4header), 
 					icmp + sizeof(struct ICMPv4header), 
 					sizeof(reply) - sizeof(struct ICMPv4header)); // Copy extra data
-			// I originally had it as sizeof(ICMPv4header) and the Mac rejected all its pings
-			icmpReply->checksum = checksumUnrolled(icmpReply, (uint8_t *)icmpReply + sizeof(reply));
+			//icmpReply->checksum = checksumUnrolled(icmpReply, (uint8_t *)icmpReply + sizeof(reply));
+			icmpReply->checksum = ~checksumUpdate(0, icmpReply, sizeof(reply));
 
 			sendIPv4packet(&((struct IPv4header *)ip)->srcIP, &localIP, PROTO_ICMPv4, sizeof(reply), 1, LAYERS({reply, sizeof(reply)}));
 			// Dest IP, Src IP, ICMPv4 code, total payload length, number of payloads, first payload content, size of first content

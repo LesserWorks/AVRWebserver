@@ -1,34 +1,53 @@
 .section .text
-; uint16_t checksumBig(uint8_t *data, uint8_t *end);
-.global checksumBig
-; This function calculates a 16 bit one's complement checksum
-; compatible with IPv4, TCP, etc.
-; The data to checksum over must be in big endian as specified by IP.
-; r24:25 must hold the address of the first byte to checksum over
-; r22:23 must hold one past the address of the last byte to checksum over
-; End pointer can be calulated as data + sizeof(data) if data is a compile time array
-checksumBig:
-movw Z, r24		; pointer in Z
-ld r25, Z+
-ld r24, Z+ 			; r24:25 used as checksum accumulator
-loopBig:
-cp ZL, r22 
-cpc ZH, r23 		; compare current pointer with end pointer
-brsh endSequence 	; Are we at or past end pointer?
-ld r27, Z+			; high byte first
-ld r26, Z+ 			; low byte (big endian)
-add r24, r26 		; add low bytes
-adc r25, r27 		; add high bytes
-adc r24, r1 		; add carry back around
-adc r25, r1
-rjmp loopBig
-endSequence: 		; reached end of data to checksum over
-com r24
-com r25 			; flip bits
-ret
-; Even for maximum length packet of 1500 bytes, checksum will not take more than a millisecond
-; Best case scenario of 0 words will take 5 + 4 + 6 = 15 cycles
-; For n words with n > 0, will take 5 + 13(n - 1) + 10 = 15 + 13(n - 1) = 13n + 2 cycles
+; uint16_t checksumUpdate(uint16_t context, const void *data, uint16_t len)
+.global checksumUpdate
+; context in r25:24, data in r23:22, len in r21:20, assumes len is a multiple of 2
+checksumUpdate:
+movw X, r22 ; copy data pointer to X
+mov r22, r20 ; make copy of length lower byte
+add r20, XL
+adc r21, XH ; add length to start pointer to get end pointer in r21:20
+lsr r22 ; divide lower byte of len by 2 to get number of 16 bit words
+andi r22, 0b00000011 ; isolate last two LSBs, giving length % 4
+ldi ZL, pm_lo8(tableJump) 
+ldi ZH, pm_hi8(tableJump) ; load the flash address of the jump table
+add ZL, r22
+adc ZH, r1 ; add length % 4 to the address of the jump table
+ijmp
+tableJump:
+rjmp zeroLeftover
+rjmp oneLeftover
+rjmp twoLeftover
+rjmp threeLeftover
+addLoop:
+ld r23, X+
+ld r22, X+ ; load next word big endian
+add r24, r22
+adc r25, r23 ; add to accumulator
+adc r24, r1 ; add carry back around
+threeLeftover:
+ld r23, X+
+ld r22, X+
+add r24, r22
+adc r25, r23
+adc r24, r1
+twoLeftover:
+ld r23, X+
+ld r22, X+
+add r24, r22
+adc r25, r23
+adc r24, r1
+oneLeftover:
+ld r23, X+
+ld r22, X+
+add r24, r22
+adc r25, r23
+adc r24, r1
+zeroLeftover:
+cp XL, r20 
+cpc XH, r21 		; compare current pointer with end pointer
+brlo addLoop
+ret ; do not complement output since we are not outputting final checksum, just a running context
 
 ; uint16_t checksumUnrolled(uint8_t *data, uint8_t *end);
 .global checksumUnrolled
@@ -46,6 +65,7 @@ sbc r23, XH 		; r22:23 now holds remaining length in units of 8 bit bytes
 lsr r23
 ror r22				; divide length by 2 to get it in units of 16 bit words
 movw r30, r22 		; r30:31 now also holds length in units of 16 bit words
+; The following is way over complicated. To calculate mod 4, just AND with 0b00000011
 lsr r31
 ror r30
 lsr r31

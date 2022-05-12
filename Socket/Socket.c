@@ -29,8 +29,8 @@ static void sendTCPpacket(const struct Stream *const restrict stream, const uint
 
 // Standard MSS without options is 536 bytes
 // TCP todo:
-// Make sendTCPpacket take in relative seq numbers
 // Add separate retransmit timers for each TCP segment
+// Allow receiving TCP frames out of order
 
 void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header *const restrict ip, const struct TCPheader *const restrict tcp) {
 	printf("TCPprocessor state = %u, flags = 0x%02X\n", stream->state, tcp->flags);
@@ -101,8 +101,7 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 			// Have we received a FIN frame and we have ACKed all their data up to FIN?
 			if(tcp->flags & FIN && tcp->seq == stream->rx.head + stream->rx.rawseq) {
 				// Send ACK to their FIN here
-				sendTCPpacket(stream, stream->tx.next, stream->rx.head + 1, // Add 1 to ACK their FIN phantom byte
-									  ACK, NULL, 0, NULL, 0);
+				sendTCPpacket(stream, stream->tx.next, stream->rx.head + 1, ACK, NULL, 0, NULL, 0);
 				switch(stream->state) { // Sorry for a nested switch here
 					case ESTABLISHED:
 						stream->state = CLOSE_WAIT; // Now we wait for user to call closeStream()
@@ -130,8 +129,11 @@ void TCPprocessor(struct Stream *const restrict stream, const struct IPv4header 
 		}
 		case LAST_ACK: // In these two states we are just waiting for them to ACK our FIN
 		case CLOSING:
-			if(tcp->flags & RST)
+			if(tcp->flags & RST) {
 				stream->state = CLOSED;
+				stream->inUse = 0; // Free this stream
+				break;
+			}
 			stream->tx.tail = tcp->ack - stream->tx.rawseq; // Move tail to after last ACKed byte
 			if((tcp->flags & ACK) && stream->tx.tail > stream->tx.next) { // They ACKed our FIN
 				if(stream->state == LAST_ACK) {
@@ -169,9 +171,9 @@ int16_t TCPrecv(const int8_t stream, void *const dest, const int16_t buflen, con
 			return buflen > length ? length : buflen; // We wrote to user the minimum of these
 		}
 		// The following three states are the only ones in which we can still receive data
-		else if(s->state != ESTABLISHED && s->state != FIN_WAIT_1 && s->state != FIN_WAIT_2) 
+		else if(!(s->state == ESTABLISHED || s->state == FIN_WAIT_1 || s->state == FIN_WAIT_2)) 
 			return 0; // Return 0 if other end sent FIN and there is no more data waiting
-		else if(flags == MSG_DONTWAIT)
+		else if(flags & MSG_DONTWAIT)
 			return -1; // return EWOULDBLOCK
 		else
 			packetHandler(); // Process more packets before checking streams again
@@ -208,7 +210,7 @@ void TCPclose(const int8_t stream) {
 			if(s->state == ESTABLISHED)
 				s->state = FIN_WAIT_1; // Wait for them to ACK our FIN before they send their own FIN
 			else // CLOSE_WAIT
-				s->state = LAST_ACK; // Wait for them to ACK our FIN
+				s->state = LAST_ACK; // Wait for them to ACK our FIN (they already sent their FIN)
 			break;
 		default:
 			s->state = CLOSED; // Strictly speaking unnecessary to set this
@@ -291,8 +293,15 @@ static uint16_t checksumC(const uint8_t data[], const uint16_t lenBytes) {
 
 static uint16_t TCPchecksum(const struct IPv4 *const restrict destIP, const struct TCPheader *const restrict tcp, 
 							const uint8_t options[], const uint8_t optionsLen, const uint8_t data[], const uint16_t dataLen) {
-	//struct TCPpseudoHeader pseudo = {.srcIP = localIP, .destIP = ip->srcIP, .zero = 0, .protocol = PROTO_TCP, 
-	//												.length = sizeof(struct TCPheader) + optionsLen + dataLen};
+	struct TCPpseudoHeader pseudo = {.srcIP = localIP, .destIP = *destIP, .zero = 0, .protocol = PROTO_TCP, 
+									 .length = sizeof(struct TCPheader) + optionsLen + dataLen};
+	uint16_t checksum = 0;
+	checksum = checksumUpdate(checksum, &pseudo, sizeof(pseudo));
+	checksum = checksumUpdate(checksum, tcp, sizeof(struct TCPheader));
+	checksum = checksumUpdate(checksum, options, optionsLen);
+	checksum = checksumUpdate(checksum, data, dataLen);
+	return ~checksum;
+	/*
 	uint8_t checksumData[sizeof(struct TCPpseudoHeader) + sizeof(struct TCPheader) + optionsLen + dataLen];
 	struct TCPpseudoHeader *pseudo = (struct TCPpseudoHeader *)checksumData;
 	pseudo->srcIP = localIP;
@@ -309,5 +318,5 @@ static uint16_t TCPchecksum(const struct IPv4 *const restrict destIP, const stru
 	memcpy(ptr, data, dataLen);
 	ptr += dataLen;
 	return checksumUnrolled(checksumData, ptr);
-	//return checksumC(checksumData, sizeof(struct TCPpseudoHeader) + sizeof(struct TCPheader) + optionsLen + dataLen);
+	*/
 }
