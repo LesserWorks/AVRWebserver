@@ -25,24 +25,28 @@ ld r22, X+ ; load next word big endian
 add r24, r22
 adc r25, r23 ; add to accumulator
 adc r24, r1 ; add carry back around
+adc r25, r1
 threeLeftover:
 ld r23, X+
 ld r22, X+
 add r24, r22
 adc r25, r23
 adc r24, r1
+adc r25, r1
 twoLeftover:
 ld r23, X+
 ld r22, X+
 add r24, r22
 adc r25, r23
 adc r24, r1
+adc r25, r1
 oneLeftover:
 ld r23, X+
 ld r22, X+
 add r24, r22
 adc r25, r23
 adc r24, r1
+adc r25, r1
 zeroLeftover:
 cp XL, r20 
 cpc XH, r21 		; compare current pointer with end pointer
